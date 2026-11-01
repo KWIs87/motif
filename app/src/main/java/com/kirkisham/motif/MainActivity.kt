@@ -51,7 +51,7 @@ class MainActivity : ComponentActivity() {
             MotifTheme(appearance) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     if (loggedIn) MotifNavHost(app, pendingRoute = pendingRoute, onRouteConsumed = { pendingRoute = null })
-                    else LoginScreen(status) { app.spotifyAuth.startLogin() }
+                    else LoginScreen(status) { app.spotifyAuth.startLogin(this@MainActivity) }
                 }
             }
         }

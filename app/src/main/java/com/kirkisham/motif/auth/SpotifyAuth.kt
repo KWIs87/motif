@@ -43,8 +43,12 @@ class SpotifyAuth(private val context: Context, private val store: TokenStore) {
         "streaming",
     )
 
-    /** Opens Spotify's login page in a Custom Tab. The result comes back to MainActivity as motif://callback. */
-    fun startLogin() {
+    /**
+     * Opens Spotify's login page in a Custom Tab. The result comes back to MainActivity as motif://callback.
+     * Must be given an Activity: launching from the application context throws without FLAG_ACTIVITY_NEW_TASK,
+     * and a Custom Tab wants an activity anyway. Falls back to a plain browser intent if no Custom Tabs browser exists.
+     */
+    fun startLogin(activity: android.app.Activity) {
         val verifier = randomVerifier()
         store.pendingVerifier = verifier
         val challenge = sha256Base64Url(verifier)
@@ -56,7 +60,11 @@ class SpotifyAuth(private val context: Context, private val store: TokenStore) {
             .appendQueryParameter("code_challenge", challenge)
             .appendQueryParameter("scope", scopes.joinToString(" "))
             .build()
-        CustomTabsIntent.Builder().build().launchUrl(context, uri)
+        try {
+            CustomTabsIntent.Builder().setShowTitle(false).build().launchUrl(activity, uri)
+        } catch (e: android.content.ActivityNotFoundException) {
+            activity.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri))
+        }
     }
 
     /** Handles the motif://callback?code=... redirect. Returns true when tokens were stored. */
