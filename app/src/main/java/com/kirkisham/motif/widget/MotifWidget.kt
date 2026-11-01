@@ -56,7 +56,8 @@ class MotifWidget : AppWidgetProvider() {
         if (!remote.isSpotifyInstalled) return
         remote.acquire(HOLD)
         try {
-            val ok = withTimeoutOrNull(8_000) { remote.connection.first { it == SpotifyRemote.Connection.Connected } } != null
+            // Keep the whole handler under the ~10 s a receiver gets after goAsync().
+            val ok = withTimeoutOrNull(6_000) { remote.connection.first { it == SpotifyRemote.Connection.Connected } } != null
             if (!ok) { Log.w(TAG, "Widget: Spotify did not connect"); return }
             when (action) {
                 ACTION_PREV -> remote.skipBack()
@@ -64,8 +65,8 @@ class MotifWidget : AppWidgetProvider() {
                 ACTION_PLAY -> remote.togglePlayPause()
             }
             // Let the new state arrive, then redraw once.
-            withTimeoutOrNull(2_500) { remote.playback.first { it != null } }
-            kotlinx.coroutines.delay(400)
+            withTimeoutOrNull(1_500) { remote.playback.first { it != null } }
+            kotlinx.coroutines.delay(300)
             renderAll(app)
         } finally {
             remote.release(HOLD)
