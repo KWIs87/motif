@@ -41,8 +41,15 @@ jobs:
           ls -la app/libs
 
       - name: Decode signing key
-        if: ${{ secrets.MOTIF_KEYSTORE_B64 != '' }}
-        run: echo "${{ secrets.MOTIF_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/motif-release.jks"
+        env:
+          KEYSTORE_B64: ${{ secrets.MOTIF_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/motif-release.jks"
+            echo "Signing key present."
+          else
+            echo "No signing key secret; building unsigned."
+          fi
 
       - name: Build release APK
         env:
