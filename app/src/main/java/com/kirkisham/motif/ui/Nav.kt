@@ -1,17 +1,11 @@
 package com.kirkisham.motif.ui
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -21,8 +15,7 @@ import com.kirkisham.motif.MotifApp
 import com.kirkisham.motif.data.LastEpisode
 import com.kirkisham.motif.ui.components.AddTarget
 import com.kirkisham.motif.ui.components.AddToHost
-import com.kirkisham.motif.ui.components.PlainLine
-import com.kirkisham.motif.ui.components.TopBar
+import com.kirkisham.motif.ui.alarm.AlarmScreen
 import com.kirkisham.motif.ui.home.HomeScreen
 import com.kirkisham.motif.ui.nowplaying.NowPlayingScreen
 import com.kirkisham.motif.ui.playlist.PlaylistScreen
@@ -88,13 +81,7 @@ fun MotifNavHost(app: MotifApp, nav: NavHostController = rememberNavController()
         }
         composable(Routes.NOW) { NowPlayingScreen(app, onBack = { nav.popBackStack() }) }
         composable(Routes.SETTINGS) { SettingsScreen(app, onBack = { nav.popBackStack() }) }
-        composable(Routes.ALARM) {
-            // Stage 3 replaces this with the Alarm editor.
-            Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
-                TopBar("Alarm", onBack = { nav.popBackStack() })
-                PlainLine("Alarms arrive in the next build.", Modifier.padding(start = 8.dp))
-            }
-        }
+        composable(Routes.ALARM) { AlarmScreen(app, onBack = { nav.popBackStack() }) }
     }
 
     AddToHost(app, plusTarget, null, onDismiss = { plusTarget = null })

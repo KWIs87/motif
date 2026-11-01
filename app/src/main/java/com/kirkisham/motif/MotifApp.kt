@@ -1,6 +1,8 @@
 package com.kirkisham.motif
 
 import android.app.Application
+import com.kirkisham.motif.alarm.AlarmScheduler
+import com.kirkisham.motif.alarm.AlarmStore
 import com.kirkisham.motif.auth.SpotifyApi
 import com.kirkisham.motif.auth.SpotifyAuth
 import com.kirkisham.motif.auth.TokenStore
@@ -28,6 +30,10 @@ class MotifApp : Application() {
         private set
     lateinit var lyrics: Lyrics
         private set
+    lateinit var alarmStore: AlarmStore
+        private set
+    lateinit var alarmScheduler: AlarmScheduler
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -39,6 +45,8 @@ class MotifApp : Application() {
         remote = SpotifyRemote(this)
         player = PlaybackController(remote, prefs, library)
         lyrics = Lyrics()
+        alarmStore = AlarmStore(this)
+        alarmScheduler = AlarmScheduler(this, alarmStore)
     }
 
     companion object {

@@ -133,3 +133,14 @@ Choices made while building where the boards or the text left room. Append; do n
 - Podcast speed uses App Remote's setPodcastPlaybackSpeed, which has fixed steps (0.5/0.8/1/1.2/1.5/2/3). The 1.25x chip sends 1.2x. Speed is remembered per show (the episode's "album" URI from App Remote is the show).
 - Sleep timer lives in PlaybackController so it keeps counting when the screen is left; the chip shows minutes left; long press the chip cancels.
 - Settings color pickers are a sheet with 16 presets plus R/G/B sliders. Muted/hairline tones are derived from the chosen text and background so contrast steps stay the same.
+
+### Build 1, stage 3 (0.4)
+- Alarms live in DataStore as one JSON list (few, small objects); no Room.
+- Scheduling: AlarmManager.setAlarmClock per alarm; snooze is a second one-shot PendingIntent on the same id. A receiver reschedules everything after boot, time or time-zone changes, and when the exact-alarm permission changes.
+- Ringing: a foreground service (mediaPlayback type) connects App Remote, plays each song as a single-track URI, and advances when Spotify reports the song paused at its end or drifts to another track (autoplay). The ringing screen is launched by the notification's full-screen intent (lock screen) and directly when unlocked.
+- Fade ramps STREAM_MUSIC from start to end volume once a second; the user's media and alarm volumes are restored on snooze or dismiss. The fallback tone (Spotify silent for 10 s) is a generated two-note pattern on the alarm stream at end volume; the fade does not apply to it.
+- Repeat first song replays songs[0] each time; Random start rotates the list from a random index; the list loops until the play-for window ends.
+- One-time alarms switch themselves off after ringing (snooze still fires). Recurring alarms move to the next selected day.
+- Saved alarms: tap loads into the editor, long press asks to delete (sheet). Save with no songs is allowed and warns that the tone will ring.
+- Permission lines (exact alarms, lock-screen full-screen intent on Android 14+, battery optimization) show as plain accent-colored lines in the editor while not granted; each opens the matching system settings page.
+- The song picker is a sheet (search plus browse any playlist) rather than a Search screen, which is Build 2.
