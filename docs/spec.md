@@ -109,3 +109,27 @@ Appearance section only (see design rules). The rest of the Settings board is Bu
 
 ## 5. Out of scope, permanently
 Social features, video, ads/promos, anything that bypasses the Spotify app for audio.
+
+## Decisions
+
+Choices made while building where the boards or the text left room. Append; do not rewrite.
+
+### Build 1, stage 1 (0.2)
+- App Remote connection is one shared object with reference-counted holds: the activity holds it while in front, the alarm service and widget take their own. It reconnects with exponential backoff (1 s → 30 s) while anyone holds it.
+- Album art comes through App Remote's ImagesApi (no Web API image round-trips); playlist covers come from the Web API JSON.
+- Stage 1 only: tapping a playlist on Home plays it. Stage 2 moves Play into the long-press menu and tapping opens the playlist.
+
+### Build 1, stage 2 (0.3)
+- Home header: star (Claude sheet, no-op until Build 2), clock (Alarm), gear (Settings). The board's search icon is Build 2 and is not shown.
+- Home lists pinned playlists, then the 6 most recently played of the rest ("Recent"); the full list is one tap away under All playlists.
+- "All podcasts" row opens a sheet listing the saved shows (GET /me/shows); tapping a show plays it and Spotify resumes where that show left off. No separate podcasts screen exists in the boards, so none was added.
+- "Last episode" on Home is the last episode App Remote reported playing (stored locally). Spotify's recently-played endpoint does not return episodes.
+- Playlist screen: long press and release without moving opens the song menu; long press and drag reorders. A drop while sorted by Name/Artist/Length places the song after its new neighbour in Spotify's order and switches the chip to Custom.
+- Shuffle on the Playlist header is a thin icon beside the Play circle (the board shows Play only; the text asks for both).
+- Song menu has Play next, Add to playlist, Remove from this playlist. "Go to artist" waits for the Song and artist info screen (Build 2).
+- Delete (unfollow) confirms in a bottom sheet, not a dialog.
+- Now playing scrubber shows elapsed on the left and remaining ("-2:35") on the right, following the text rather than the board's total.
+- Share uses the stock Android share sheet with "Title — Artist" and the open.spotify.com link. Filtering the sheet to WhatsApp and SMS only would mean hard-coding package names; left for later.
+- Podcast speed uses App Remote's setPodcastPlaybackSpeed, which has fixed steps (0.5/0.8/1/1.2/1.5/2/3). The 1.25x chip sends 1.2x. Speed is remembered per show (the episode's "album" URI from App Remote is the show).
+- Sleep timer lives in PlaybackController so it keeps counting when the screen is left; the chip shows minutes left; long press the chip cancels.
+- Settings color pickers are a sheet with 16 presets plus R/G/B sliders. Muted/hairline tones are derived from the chosen text and background so contrast steps stay the same.

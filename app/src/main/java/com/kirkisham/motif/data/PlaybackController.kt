@@ -2,6 +2,8 @@ package com.kirkisham.motif.data
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -59,6 +61,25 @@ class PlaybackController(
     }
 
     fun clearNotice() { _notice.value = null }
+
+    // ---- Sleep timer (podcast board): pauses when it reaches zero. ----
+
+    private val _sleepEndsAt = MutableStateFlow<Long?>(null)
+    /** Epoch millis when playback pauses, or null when no timer is set. */
+    val sleepEndsAt: StateFlow<Long?> = _sleepEndsAt.asStateFlow()
+    private var sleepJob: Job? = null
+
+    fun setSleepMinutes(minutes: Int?) {
+        sleepJob?.cancel()
+        if (minutes == null || minutes <= 0) { _sleepEndsAt.value = null; return }
+        val end = System.currentTimeMillis() + minutes * 60_000L
+        _sleepEndsAt.value = end
+        sleepJob = scope.launch {
+            delay(end - System.currentTimeMillis())
+            _sleepEndsAt.value = null
+            if (remote.isConnected) remote.pause()
+        }
+    }
 
     /** True when Spotify is connected, waiting up to a few seconds for a connection in progress. */
     private suspend fun ensure(): Boolean {

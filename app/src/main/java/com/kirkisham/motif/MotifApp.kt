@@ -5,6 +5,7 @@ import com.kirkisham.motif.auth.SpotifyApi
 import com.kirkisham.motif.auth.SpotifyAuth
 import com.kirkisham.motif.auth.TokenStore
 import com.kirkisham.motif.data.Library
+import com.kirkisham.motif.data.Lyrics
 import com.kirkisham.motif.data.PlaybackController
 import com.kirkisham.motif.data.Prefs
 import com.kirkisham.motif.data.SpotifyRemote
@@ -25,6 +26,8 @@ class MotifApp : Application() {
         private set
     lateinit var player: PlaybackController
         private set
+    lateinit var lyrics: Lyrics
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -35,6 +38,7 @@ class MotifApp : Application() {
         prefs = Prefs(this)
         remote = SpotifyRemote(this)
         player = PlaybackController(remote, prefs, library)
+        lyrics = Lyrics()
     }
 
     companion object {

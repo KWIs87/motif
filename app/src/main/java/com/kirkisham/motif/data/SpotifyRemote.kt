@@ -16,6 +16,7 @@ import com.spotify.protocol.client.Subscription
 import com.spotify.protocol.types.Image
 import com.spotify.protocol.types.ImageUri
 import com.spotify.protocol.types.PlaybackSpeed
+import com.spotify.protocol.types.PlayerContext
 import com.spotify.protocol.types.PlayerState
 import com.spotify.protocol.types.Repeat
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,6 +51,8 @@ class SpotifyRemote(private val context: Context) {
         val title: String,
         val artist: String,
         val album: String,
+        /** For episodes this is the show's URI (Spotify maps show -> album). */
+        val albumUri: String?,
         val imageUri: String?,
         val durationMs: Long,
         val positionMs: Long,
@@ -77,6 +80,7 @@ class SpotifyRemote(private val context: Context) {
     private val handler = Handler(Looper.getMainLooper())
     private var remote: SpotifyAppRemote? = null
     private var stateSub: Subscription<PlayerState>? = null
+    private var contextSub: Subscription<PlayerContext>? = null
     private val holds = mutableSetOf<String>()
     private var retryAttempt = 0
     private var retryPosted: Runnable? = null
@@ -86,6 +90,12 @@ class SpotifyRemote(private val context: Context) {
 
     private val _playback = MutableStateFlow<Playback?>(null)
     val playback: StateFlow<Playback?> = _playback.asStateFlow()
+
+    /** Title of what is playing from (playlist, album, show), or null. */
+    private val _contextTitle = MutableStateFlow<String?>(null)
+    val contextTitle: StateFlow<String?> = _contextTitle.asStateFlow()
+    private val _contextUri = MutableStateFlow<String?>(null)
+    val contextUri: StateFlow<String?> = _contextUri.asStateFlow()
 
     /** Small LRU of album art by image URI so screens do not re-fetch the same cover. */
     private val artCache = object : LinkedHashMap<String, Bitmap>(8, 0.75f, true) {
@@ -147,12 +157,17 @@ class SpotifyRemote(private val context: Context) {
             } as Subscription<PlayerState>
         // Prime the state immediately rather than waiting for the first change.
         r.playerApi.playerState.setResultCallback { ps -> _playback.value = ps.toPlayback() }
+        contextSub?.cancel()
+        contextSub = r.playerApi.subscribeToPlayerContext()
+            .setEventCallback { c -> _contextTitle.value = c.title?.takeIf { it.isNotBlank() }; _contextUri.value = c.uri }
+            .setErrorCallback { } as Subscription<PlayerContext>
     }
 
     private fun onDropped() {
         remote?.let { SpotifyAppRemote.disconnect(it) }
         remote = null
         stateSub = null
+        contextSub = null
         if (holds.isNotEmpty()) {
             _connection.value = Connection.Failed("Disconnected")
             scheduleRetry()
@@ -176,6 +191,8 @@ class SpotifyRemote(private val context: Context) {
         retryPosted = null
         stateSub?.cancel()
         stateSub = null
+        contextSub?.cancel()
+        contextSub = null
         remote?.let { SpotifyAppRemote.disconnect(it) }
         remote = null
         retryAttempt = 0
@@ -264,6 +281,7 @@ class SpotifyRemote(private val context: Context) {
             title = t.name ?: "",
             artist = t.artist?.name ?: t.artists?.firstOrNull()?.name ?: "",
             album = t.album?.name ?: "",
+            albumUri = t.album?.uri,
             imageUri = t.imageUri?.raw,
             durationMs = t.duration,
             positionMs = playbackPosition,
