@@ -92,6 +92,8 @@ jobs:
         run: |
           f="${{ steps.name.outputs.file }}"
           gh release view latest >/dev/null 2>&1 || gh release create latest --title "Motif latest" --notes "Rolling build from main." --latest
+          # Keep only the current build on the rolling release.
+          for a in $(gh release view latest --json assets --jq '.assets[].name'); do gh release delete-asset latest "$a" -y; done
           gh release upload latest "$f" --clobber
           cp "$f" motif-latest.apk
           gh release upload latest motif-latest.apk --clobber
