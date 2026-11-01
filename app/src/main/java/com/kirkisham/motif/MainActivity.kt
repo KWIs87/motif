@@ -28,6 +28,8 @@ import com.kirkisham.motif.data.Appearance
 import com.kirkisham.motif.ui.MotifColors
 import com.kirkisham.motif.ui.MotifNavHost
 import com.kirkisham.motif.ui.MotifTheme
+import com.kirkisham.motif.ui.Routes
+import com.kirkisham.motif.widget.MotifWidget
 import kotlinx.coroutines.launch
 
 /** Entry point: login gate, then the navigation host. Screens live under ui/. */
@@ -36,6 +38,8 @@ class MainActivity : ComponentActivity() {
     private val app get() = application as MotifApp
     private var loggedIn by mutableStateOf(false)
     private var status by mutableStateOf<String?>(null)
+    /** Route requested from outside (widget tap); consumed by the nav host. */
+    private var pendingRoute by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,7 +50,8 @@ class MainActivity : ComponentActivity() {
             val appearance by app.prefs.appearance.collectAsStateWithLifecycle(Appearance())
             MotifTheme(appearance) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    if (loggedIn) MotifNavHost(app) else LoginScreen(status) { app.spotifyAuth.startLogin() }
+                    if (loggedIn) MotifNavHost(app, pendingRoute = pendingRoute, onRouteConsumed = { pendingRoute = null })
+                    else LoginScreen(status) { app.spotifyAuth.startLogin() }
                 }
             }
         }
@@ -68,6 +73,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(MotifWidget.EXTRA_OPEN_NOW, false) == true) {
+            intent.removeExtra(MotifWidget.EXTRA_OPEN_NOW)
+            pendingRoute = Routes.NOW
+        }
         val uri = intent?.data ?: return
         if (uri.scheme != "motif") return
         lifecycleScope.launch {

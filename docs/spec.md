@@ -144,3 +144,11 @@ Choices made while building where the boards or the text left room. Append; do n
 - Saved alarms: tap loads into the editor, long press asks to delete (sheet). Save with no songs is allowed and warns that the tone will ring.
 - Permission lines (exact alarms, lock-screen full-screen intent on Android 14+, battery optimization) show as plain accent-colored lines in the editor while not granted; each opens the matching system settings page.
 - The song picker is a sheet (search plus browse any playlist) rather than a Search screen, which is Build 2.
+
+### Build 1, stage 4 (0.5)
+- Widget is a classic AppWidgetProvider with RemoteViews (no Glance dependency). 4x2 default, resizable down to about 3x1.
+- Colors, opacity and glow are applied by tinting two shape drawables (card and a stroke ring) and the glyphs, so any color works without rendering bitmaps. Glow intensity sets the ring's alpha; a blurred halo is not possible in RemoteViews.
+- Button taps broadcast to the provider, which connects App Remote if the app is not running (up to 8 s), sends the command, waits for the new state and redraws. While the app or the alarm service is alive, every playback change redraws the widget.
+- Tapping the text opens Now playing in the app. Tapping the art opens Widget settings (also reachable from the launcher's reconfigure action on Android 12+ and when the widget is first added).
+- Widget settings screen: "Widget uses app settings" switch (shared with Settings), text color, background color, background opacity, text size, glow color, glow intensity. When the switch is on, only opacity comes from the widget's own settings. The app's default #121212 background maps to the widget card tone #1A1A1A.
+- Cover art in the widget comes through App Remote's ImagesApi when connected; otherwise the placeholder tone shows.

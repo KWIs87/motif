@@ -34,8 +34,16 @@ object Routes {
 }
 
 @Composable
-fun MotifNavHost(app: MotifApp, nav: NavHostController = rememberNavController()) {
+fun MotifNavHost(
+    app: MotifApp,
+    nav: NavHostController = rememberNavController(),
+    pendingRoute: String? = null,
+    onRouteConsumed: () -> Unit = {},
+) {
     val playback by app.remote.playback.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingRoute) {
+        if (pendingRoute != null) { nav.navigate(pendingRoute) { launchSingleTop = true }; onRouteConsumed() }
+    }
     var plusTarget by remember { mutableStateOf<AddTarget?>(null) }
     val onPlus: () -> Unit = { playback?.let { plusTarget = AddTarget(it.uri, it.title) } }
 

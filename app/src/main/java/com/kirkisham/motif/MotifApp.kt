@@ -11,6 +11,14 @@ import com.kirkisham.motif.data.Lyrics
 import com.kirkisham.motif.data.PlaybackController
 import com.kirkisham.motif.data.Prefs
 import com.kirkisham.motif.data.SpotifyRemote
+import com.kirkisham.motif.widget.MotifWidget
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 /** Process-wide singletons. Screens reach them through MotifApp.get(context). */
 class MotifApp : Application() {
@@ -47,6 +55,20 @@ class MotifApp : Application() {
         lyrics = Lyrics()
         alarmStore = AlarmStore(this)
         alarmScheduler = AlarmScheduler(this, alarmStore)
+
+        // Keep the widget in step with playback and with the style settings, whenever this process is alive.
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        scope.launch {
+            remote.playback
+                .map { p -> p?.let { Triple(it.uri, it.isPaused, it.imageUri) } }
+                .distinctUntilChanged()
+                .collect { if (MotifWidget.hasWidgets(this@MotifApp)) MotifWidget.update(this@MotifApp) }
+        }
+        scope.launch {
+            combine(prefs.appearance, prefs.widgetStyle, prefs.widgetUsesApp) { a, w, u -> Triple(a, w, u) }
+                .distinctUntilChanged()
+                .collect { if (MotifWidget.hasWidgets(this@MotifApp)) MotifWidget.update(this@MotifApp) }
+        }
     }
 
     companion object {
