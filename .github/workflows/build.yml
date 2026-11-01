@@ -33,13 +33,13 @@ jobs:
       # Spotify's Android SDK ships as AARs on GitHub, not on Maven. Only App Remote is needed:
       # login is Motif's own PKCE flow, and the release also ships two overlapping auth AARs that collide.
       - name: Fetch Spotify App Remote AAR
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p app/libs
-          api=https://api.github.com/repos/spotify/android-sdk/releases/latest
-          url=$(curl -sSL "$api" | grep browser_download_url | grep -E 'spotify-app-remote[^"]*\.aar"' | head -1 | cut -d '"' -f 4)
-          test -n "$url" || { echo "No app-remote AAR found in latest release"; exit 1; }
-          curl -sSL -o "app/libs/$(basename "$url")" "$url"
+          gh release download --repo spotify/android-sdk --pattern 'spotify-app-remote*.aar' --dir app/libs
           ls -la app/libs
+          test -n "$(ls app/libs/*.aar 2>/dev/null)" || { echo "No app-remote AAR downloaded"; exit 1; }
 
       - name: Decode signing key
         env:
