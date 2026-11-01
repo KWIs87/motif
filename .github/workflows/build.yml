@@ -44,10 +44,14 @@ jobs:
       - name: Decode signing key
         env:
           KEYSTORE_B64: ${{ secrets.MOTIF_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.MOTIF_KEYSTORE_PASSWORD }}
         run: |
           if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/motif-release.jks"
-            echo "Signing key present."
+            # Tolerate whitespace and line breaks picked up when the secret was pasted.
+            printf '%s' "$KEYSTORE_B64" | tr -d ' \t\r\n' | base64 -d -i > "$RUNNER_TEMP/motif-release.jks"
+            keytool -list -keystore "$RUNNER_TEMP/motif-release.jks" -storepass "$KEYSTORE_PASSWORD" -alias motif >/dev/null \
+              && echo "Signing key present and readable." \
+              || { echo "Keystore decoded but could not be opened: check MOTIF_KEYSTORE_B64 and MOTIF_KEYSTORE_PASSWORD."; exit 1; }
           else
             echo "No signing key secret; building unsigned."
           fi
