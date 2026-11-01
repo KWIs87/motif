@@ -68,8 +68,10 @@ jobs:
         id: name
         run: |
           v=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
-          out="motif-${v}-$(git rev-parse --short HEAD).apk"
-          cp app/build/outputs/apk/release/app-release.apk "$out"
+          src=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          case "$src" in *unsigned*) tag="-unsigned";; *) tag="";; esac
+          out="motif-${v}-$(git rev-parse --short HEAD)${tag}.apk"
+          cp "$src" "$out"
           echo "file=$out" >> "$GITHUB_OUTPUT"
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
