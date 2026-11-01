@@ -20,16 +20,12 @@ output-metadata.json
 # IntelliJ
 *.iml
 .idea/
-misc.xml
-deploymentTargetDropDown.xml
-render.experimental.xml
 
-# Keystore files
+# Keys and secrets: never committed
 *.jks
 *.keystore
+*.b64
+keystore.password
 
-# Google Services (e.g. APIs or Firebase)
-google-services.json
-
-# Android Profiling
-*.hprof
+# Spotify SDK AARs are fetched by CI, not committed
+app/libs/
