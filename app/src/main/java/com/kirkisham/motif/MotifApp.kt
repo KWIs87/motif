@@ -20,8 +20,8 @@ import com.kirkisham.motif.widget.MotifWidget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -95,9 +95,18 @@ class MotifApp : Application() {
                 .collect { if (MotifWidget.hasWidgets(this@MotifApp)) MotifWidget.update(this@MotifApp) }
         }
         scope.launch {
-            combine(prefs.appearance, prefs.widgetStyle, prefs.widgetUsesApp) { a, w, u -> Triple(a, w, u) }
-                .distinctUntilChanged()
+            prefs.appearance.distinctUntilChanged()
                 .collect { if (MotifWidget.hasWidgets(this@MotifApp)) MotifWidget.update(this@MotifApp) }
+        }
+        // Progress bar (0.12): once a second, only while something plays and a widget exists, and only
+        // the progress views (a partial update), so the launcher is not asked to inflate the layout.
+        scope.launch {
+            remote.playback.map { it?.isPlaying == true }.distinctUntilChanged().collectLatest { playing ->
+                while (playing) {
+                    delay(1_000)
+                    if (MotifWidget.hasWidgets(this@MotifApp)) MotifWidget.tickProgress(this@MotifApp)
+                }
+            }
         }
     }
 

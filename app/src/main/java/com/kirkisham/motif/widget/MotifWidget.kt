@@ -7,7 +7,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.Color
 import android.util.Log
 import android.util.TypedValue
 import android.view.View
@@ -16,7 +15,8 @@ import com.kirkisham.motif.MainActivity
 import com.kirkisham.motif.MotifApp
 import com.kirkisham.motif.R
 import com.kirkisham.motif.data.SpotifyRemote
-import com.kirkisham.motif.data.WidgetStyle
+import com.kirkisham.motif.data.WidgetConfig
+import com.kirkisham.motif.ui.components.formatClock
 import com.spotify.protocol.types.Image
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,10 +26,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 
 /**
- * Home screen widget (spec §3.9): title, artist (or show and episode), previous, play/pause, next.
- * Buttons broadcast back here; the receiver connects App Remote if needed, sends the command,
- * and redraws from the next PlayerState. Tapping the text opens Now playing; tapping the art
- * opens the widget's settings.
+ * Home screen widget (spec §3.9, 0.12 layout): title, "Artist · Album", elapsed · progress · remaining,
+ * previous / play-pause / next. Buttons broadcast back here; the receiver connects App Remote if needed,
+ * sends the command, and redraws from the next PlayerState. Tapping the text opens Now playing; tapping
+ * the art thumbnail (when shown) opens this instance's setup. Each instance has its own [WidgetConfig].
  */
 class MotifWidget : AppWidgetProvider() {
 
@@ -39,6 +39,11 @@ class MotifWidget : AppWidgetProvider() {
 
     override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, newOptions: android.os.Bundle) {
         update(context, intArrayOf(id))
+    }
+
+    override fun onDeleted(context: Context, ids: IntArray) {
+        val app = MotifApp.get(context)
+        CoroutineScope(Dispatchers.Main.immediate).launch { runCatching { app.prefs.deleteWidgetConfigs(ids) } }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -81,106 +86,129 @@ class MotifWidget : AppWidgetProvider() {
         const val ACTION_PLAY = "com.kirkisham.motif.widget.PLAY"
         const val ACTION_NEXT = "com.kirkisham.motif.widget.NEXT"
         const val EXTRA_OPEN_NOW = "open_now_playing"
+        private const val PROGRESS_MAX = 1000
 
         fun ids(context: Context): IntArray =
             AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, MotifWidget::class.java))
 
         fun hasWidgets(context: Context) = ids(context).isNotEmpty()
 
-        /** Redraw every instance from the current playback state and style. Safe from any thread. */
+        /** Redraw every instance (or [which]) from the current playback state and each one's setup. Safe from any thread. */
         fun update(context: Context, which: IntArray? = null) {
             val app = MotifApp.get(context)
             CoroutineScope(Dispatchers.Main.immediate).launch { renderAll(app, which) }
         }
 
+        /** Progress tick (0.12): only the bar and the two times, as a partial update. Called once a second while playing. */
+        fun tickProgress(context: Context) {
+            val app = MotifApp.get(context)
+            val p = app.remote.playback.value ?: return
+            val ids = ids(app)
+            if (ids.isEmpty()) return
+            val manager = AppWidgetManager.getInstance(app)
+            val rv = RemoteViews(app.packageName, R.layout.widget_motif)
+            bindProgress(rv, p)
+            for (id in ids) manager.partiallyUpdateAppWidget(id, rv)
+        }
+
         private suspend fun renderAll(app: MotifApp, which: IntArray? = null) {
             val ids = which ?: ids(app)
             if (ids.isEmpty()) return
-            val style = effectiveStyle(app)
             val p = app.remote.playback.value
-            val art = p?.imageUri?.let { runCatching { app.remote.loadArt(it, Image.Dimension.SMALL) }.getOrNull() }
+            val textColor = app.prefs.appearanceNow().textColor
             val manager = AppWidgetManager.getInstance(app)
+            var art: Bitmap? = null
+            var artLoaded = false
             for (id in ids) {
+                val cfg = app.prefs.widgetConfigNow(id)
+                if (cfg.showArt && !artLoaded) {
+                    artLoaded = true
+                    art = p?.imageUri?.let { runCatching { app.remote.loadArt(it, Image.Dimension.SMALL) }.getOrNull() }
+                }
                 // Portrait size the launcher gave this instance (0 when unknown, which shows everything).
                 val opts = manager.getAppWidgetOptions(id)
                 val w = opts?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0) ?: 0
                 val h = opts?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0) ?: 0
-                manager.updateAppWidget(id, build(app, style, p, art, w, h))
+                manager.updateAppWidget(id, build(app, id, cfg, textColor, p, art, w, h))
             }
         }
 
-        /** App settings when the switch is on (opacity still comes from the widget's own), else the widget's own. */
-        suspend fun effectiveStyle(app: MotifApp): WidgetStyle {
-            val own = app.prefs.widgetStyleNow()
-            if (!app.prefs.widgetUsesAppNow()) return own
-            val a = app.prefs.appearanceNow()
-            return own.copy(
-                textColor = a.textColor,
-                backgroundColor = a.backgroundColor.let { if (it == 0xFF121212.toInt()) 0xFF1A1A1A.toInt() else it },
-                textSize = a.textSize,
-                glowColor = a.glowColor,
-                glowIntensity = a.glowIntensity,
-            )
+        private fun bindProgress(rv: RemoteViews, p: SpotifyRemote.Playback?) {
+            val pos = p?.positionNow() ?: 0L
+            val dur = p?.durationMs ?: 0L
+            rv.setProgressBar(R.id.widget_progress, PROGRESS_MAX, if (dur > 0) (pos * PROGRESS_MAX / dur).toInt().coerceIn(0, PROGRESS_MAX) else 0, false)
+            rv.setTextViewText(R.id.widget_elapsed, formatClock(pos))
+            rv.setTextViewText(R.id.widget_remaining, "-" + formatClock((dur - pos).coerceAtLeast(0)))
         }
 
-        private fun build(context: Context, s: WidgetStyle, p: SpotifyRemote.Playback?, art: Bitmap?, widthDp: Int = 0, heightDp: Int = 0): RemoteViews {
+        private fun build(
+            context: Context, id: Int, cfg: WidgetConfig, textColor: Int,
+            p: SpotifyRemote.Playback?, art: Bitmap?, widthDp: Int = 0, heightDp: Int = 0,
+        ): RemoteViews {
             val rv = RemoteViews(context.packageName, R.layout.widget_motif)
-            // Small cells (Samsung): below about 110 dp of height only the title fits above the buttons,
-            // and below about 150 dp of width only the play button fits on the row.
+            // Small cells (Samsung): below about 96 dp of height the second line goes, below 72 the progress
+            // row too; below about 150 dp of width only the play button fits.
             val short = heightDp in 1 until COMPACT_HEIGHT_DP
+            val tiny = heightDp in 1 until TINY_HEIGHT_DP
             val narrow = widthDp in 1 until COMPACT_WIDTH_DP
-            rv.setViewVisibility(R.id.widget_art, if (short) View.GONE else View.VISIBLE)
             rv.setViewVisibility(R.id.widget_artist, if (short) View.GONE else View.VISIBLE)
-            rv.setViewVisibility(R.id.widget_prev_cell, if (narrow) View.GONE else View.VISIBLE)
-            rv.setViewVisibility(R.id.widget_next_cell, if (narrow) View.GONE else View.VISIBLE)
-            val text = s.textColor
-            val bgAlpha = (255 * s.backgroundOpacity.coerceIn(0, 100) / 100f).roundToInt()
-            rv.setInt(R.id.widget_bg, "setColorFilter", s.backgroundColor or 0xFF000000.toInt())
-            rv.setInt(R.id.widget_bg, "setImageAlpha", bgAlpha)
-            val gi = s.glowIntensity.coerceIn(0, 100) / 100f
-            rv.setInt(R.id.widget_glow, "setColorFilter", s.glowColor or 0xFF000000.toInt())
-            rv.setInt(R.id.widget_glow, "setImageAlpha", if (gi == 0f) 0 else (255 * (0.3f + 0.6f * gi)).roundToInt())
+            rv.setViewVisibility(R.id.widget_progress_row, if (tiny) View.GONE else View.VISIBLE)
+            rv.setViewVisibility(R.id.widget_prev, if (narrow) View.GONE else View.VISIBLE)
+            rv.setViewVisibility(R.id.widget_next, if (narrow) View.GONE else View.VISIBLE)
+            rv.setViewVisibility(R.id.widget_art, if (cfg.showArt && !short) View.VISIBLE else View.GONE)
+            val timesVis = if (cfg.showTimes) View.VISIBLE else View.GONE
+            rv.setViewVisibility(R.id.widget_elapsed, timesVis)
+            rv.setViewVisibility(R.id.widget_remaining, timesVis)
 
-            val (titleSp, subSp) = when (s.textSize) { "S" -> 14f to 12f; "L" -> 19f to 15f; else -> 16f to 13f }
+            // Card: #121212 at the configured transparency.
+            rv.setInt(R.id.widget_bg, "setImageAlpha", (255 * (100 - cfg.transparency.coerceIn(0, 100)) / 100f).roundToInt())
+
+            val (titleSp, subSp, timeSp) = when (cfg.textSize) { "S" -> Triple(13f, 11f, 10f); "L" -> Triple(17f, 13f, 12f); else -> Triple(15f, 12f, 11f) }
             rv.setTextViewTextSize(R.id.widget_title, TypedValue.COMPLEX_UNIT_SP, titleSp)
             rv.setTextViewTextSize(R.id.widget_artist, TypedValue.COMPLEX_UNIT_SP, subSp)
-            rv.setTextColor(R.id.widget_title, text)
-            rv.setTextColor(R.id.widget_artist, text)
+            rv.setTextViewTextSize(R.id.widget_elapsed, TypedValue.COMPLEX_UNIT_SP, timeSp)
+            rv.setTextViewTextSize(R.id.widget_remaining, TypedValue.COMPLEX_UNIT_SP, timeSp)
+            for (v in intArrayOf(R.id.widget_title, R.id.widget_artist, R.id.widget_elapsed, R.id.widget_remaining)) rv.setTextColor(v, textColor)
 
             if (p == null) {
                 rv.setTextViewText(R.id.widget_title, "Motif")
                 rv.setTextViewText(R.id.widget_artist, "Nothing playing")
             } else {
                 rv.setTextViewText(R.id.widget_title, p.title)
-                rv.setTextViewText(R.id.widget_artist, if (p.isEpisode) p.album.ifBlank { p.artist } else p.artist)
+                val second = when {
+                    p.isEpisode -> p.album.ifBlank { p.artist }
+                    cfg.showAlbum && p.album.isNotBlank() -> p.artist + " · " + p.album
+                    else -> p.artist
+                }
+                rv.setTextViewText(R.id.widget_artist, second)
             }
-            if (art != null) rv.setImageViewBitmap(R.id.widget_art, art) else rv.setImageViewResource(R.id.widget_art, android.R.color.transparent)
+            bindProgress(rv, p)
+            if (cfg.showArt) {
+                if (art != null) rv.setImageViewBitmap(R.id.widget_art, art) else rv.setImageViewResource(R.id.widget_art, android.R.color.transparent)
+            }
 
-            rv.setInt(R.id.widget_prev, "setColorFilter", text)
-            rv.setInt(R.id.widget_next, "setColorFilter", text)
-            rv.setInt(R.id.widget_play_bg, "setColorFilter", text)
+            rv.setInt(R.id.widget_prev, "setColorFilter", textColor)
+            rv.setInt(R.id.widget_next, "setColorFilter", textColor)
+            rv.setInt(R.id.widget_play, "setColorFilter", textColor)
             rv.setImageViewResource(R.id.widget_play, if (p?.isPlaying == true) R.drawable.ic_pause else R.drawable.ic_play)
-            rv.setInt(R.id.widget_play, "setColorFilter", s.backgroundColor or 0xFF000000.toInt())
-            // Mirrors the board's glyph treatment on a light text color: dark glyph on the light circle.
-            if (luminance(text) < 0.4f) rv.setInt(R.id.widget_play, "setColorFilter", Color.WHITE)
 
             rv.setOnClickPendingIntent(R.id.widget_prev, broadcast(context, ACTION_PREV))
             rv.setOnClickPendingIntent(R.id.widget_play, broadcast(context, ACTION_PLAY))
             rv.setOnClickPendingIntent(R.id.widget_next, broadcast(context, ACTION_NEXT))
             val open = Intent(context, MainActivity::class.java).putExtra(EXTRA_OPEN_NOW, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             rv.setOnClickPendingIntent(R.id.widget_text, PendingIntent.getActivity(context, 10, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
-            val config = Intent(context, WidgetConfigActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            rv.setOnClickPendingIntent(R.id.widget_art, PendingIntent.getActivity(context, 11, config, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            val config = Intent(context, WidgetConfigActivity::class.java)
+                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            rv.setOnClickPendingIntent(R.id.widget_art, PendingIntent.getActivity(context, 1000 + id, config, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             return rv
         }
 
-        private const val COMPACT_HEIGHT_DP = 110
+        private const val COMPACT_HEIGHT_DP = 96
+        private const val TINY_HEIGHT_DP = 72
         private const val COMPACT_WIDTH_DP = 150
 
         private fun broadcast(context: Context, action: String): PendingIntent =
             PendingIntent.getBroadcast(context, action.hashCode(), Intent(context, MotifWidget::class.java).setAction(action), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-
-        private fun luminance(c: Int): Float =
-            (0.2126f * Color.red(c) + 0.7152f * Color.green(c) + 0.0722f * Color.blue(c)) / 255f
     }
 }

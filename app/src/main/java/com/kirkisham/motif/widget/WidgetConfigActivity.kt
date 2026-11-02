@@ -24,43 +24,36 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kirkisham.motif.MotifApp
 import com.kirkisham.motif.data.Appearance
-import com.kirkisham.motif.data.WidgetStyle
+import com.kirkisham.motif.data.WidgetConfig
 import com.kirkisham.motif.ui.MotifTheme
 import com.kirkisham.motif.ui.components.Chip
 import com.kirkisham.motif.ui.components.Hairline
+import com.kirkisham.motif.ui.components.PillButton
 import com.kirkisham.motif.ui.components.SectionLabel
 import com.kirkisham.motif.ui.components.TopBar
 import com.kirkisham.motif.ui.motif
-import com.kirkisham.motif.ui.settings.ColorSheet
-import com.kirkisham.motif.ui.settings.MotifSlider
 import com.kirkisham.motif.ui.settings.SettingRow
-import com.kirkisham.motif.ui.settings.Swatch
 import kotlinx.coroutines.launch
 
 /**
- * Widget settings (board Widget, "Tweaks"): the switch to follow the app's Appearance, then the
- * widget's own text color, background color, background opacity, text size, glow color and intensity.
- * Opened when the widget is added, from the launcher's reconfigure action, or by tapping the widget's art.
+ * Widget setup (0.12): shown when the widget is placed (`android:configure`), from the launcher's
+ * widget settings (`reconfigurable`) and by tapping the art thumbnail. Options are per instance:
+ * Show album line, Show times, Background transparency, Text size, Show art thumbnail at left.
  */
 class WidgetConfigActivity : ComponentActivity() {
+    private var widgetId = AppWidgetManager.INVALID_APPWIDGET_ID
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val widgetId = intent?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID) ?: AppWidgetManager.INVALID_APPWIDGET_ID
+        widgetId = intent?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID) ?: AppWidgetManager.INVALID_APPWIDGET_ID
         // A configure activity must return RESULT_OK with the id, or the launcher drops the widget.
         setResult(Activity.RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId))
         val app = MotifApp.get(this)
@@ -68,94 +61,64 @@ class WidgetConfigActivity : ComponentActivity() {
             val appearance by app.prefs.appearance.collectAsStateWithLifecycle(Appearance())
             MotifTheme(appearance) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    WidgetConfigScreen(app, onDone = { MotifWidget.update(this); finish() })
+                    WidgetConfigScreen(app, widgetId, onDone = { redraw(); finish() })
                 }
             }
         }
     }
 
+    private fun redraw() {
+        if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) MotifWidget.update(this, intArrayOf(widgetId)) else MotifWidget.update(this)
+    }
+
     override fun onPause() {
         super.onPause()
-        MotifWidget.update(this)
+        redraw()
     }
 }
 
+/** Label above a row of chips, hairline under (the chips do not fit beside the longer labels on a narrow phone). */
 @Composable
-private fun WidgetConfigScreen(app: MotifApp, onDone: () -> Unit) {
-    val style by app.prefs.widgetStyle.collectAsStateWithLifecycle(WidgetStyle())
-    val usesApp by app.prefs.widgetUsesApp.collectAsStateWithLifecycle(true)
+private fun ChipRow(label: String, chips: List<Pair<String, Boolean>>, onPick: (Int) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(label, style = MaterialTheme.typography.bodyLarge, color = motif.text)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            chips.forEachIndexed { i, (text, on) -> Chip(text, selected = on, onClick = { onPick(i) }) }
+        }
+    }
+    Hairline()
+}
+
+@Composable
+private fun WidgetConfigScreen(app: MotifApp, widgetId: Int, onDone: () -> Unit) {
+    val cfg by app.prefs.widgetConfig(widgetId).collectAsStateWithLifecycle(WidgetConfig())
     val scope = rememberCoroutineScope()
-    var picking by remember { mutableStateOf<String?>(null) }
-    fun save(w: WidgetStyle) = scope.launch { app.prefs.setWidgetStyle(w) }
-    val own = !usesApp
-    val dim = if (own) 1f else 0.4f
+    fun save(c: WidgetConfig) = scope.launch { app.prefs.setWidgetConfig(widgetId, c) }
+    val switchColors = SwitchDefaults.colors(checkedTrackColor = motif.accent, checkedThumbColor = motif.ground, uncheckedTrackColor = motif.card, uncheckedThumbColor = motif.textMuted, uncheckedBorderColor = motif.chipLine)
 
     Column(
         Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 24.dp, bottom = 40.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
-        TopBar("Widget settings", onDone)
+        TopBar("Widget setup", onDone) { PillButton("Done", onClick = onDone, modifier = Modifier.padding(end = 0.dp)) }
         Column(Modifier.padding(start = 8.dp)) {
-            SettingRow("Widget uses app settings") {
-                Switch(
-                    checked = usesApp,
-                    onCheckedChange = { on -> scope.launch { app.prefs.setWidgetUsesApp(on) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = motif.accent, checkedThumbColor = motif.ground, uncheckedTrackColor = motif.card, uncheckedThumbColor = motif.textMuted, uncheckedBorderColor = motif.chipLine),
-                )
-            }
+            SectionLabel("Lines", Modifier.padding(bottom = 8.dp))
+            SettingRow("Show album line") { Switch(checked = cfg.showAlbum, onCheckedChange = { save(cfg.copy(showAlbum = it)) }, colors = switchColors) }
+            SettingRow("Show times") { Switch(checked = cfg.showTimes, onCheckedChange = { save(cfg.copy(showTimes = it)) }, colors = switchColors) }
+            SettingRow("Show art thumbnail at left") { Switch(checked = cfg.showArt, onCheckedChange = { save(cfg.copy(showArt = it)) }, colors = switchColors) }
             Text(
-                if (usesApp) "The widget follows the Appearance settings in the app. Background opacity below still applies."
-                else "The widget keeps the colors, size and glow set here.",
+                "The second line reads \u201cArtist \u00B7 Album\u201d, or just the artist with the album line off. Times are elapsed and remaining either side of the progress bar.",
                 style = MaterialTheme.typography.bodySmall, color = motif.textMuted, modifier = Modifier.padding(top = 10.dp), lineHeight = 18.sp,
             )
         }
         Column(Modifier.padding(start = 8.dp)) {
-            SectionLabel("Widget", Modifier.padding(bottom = 8.dp))
-            Column(Modifier.alphaCompat(dim)) {
-                SettingRow("Text color") { Swatch(Color(style.textColor)) { if (own) picking = "text" } }
-                SettingRow("Background color") { Swatch(Color(style.backgroundColor)) { if (own) picking = "bg" } }
-            }
-            Column(Modifier.padding(vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Background opacity", style = MaterialTheme.typography.bodyLarge, color = motif.text)
-                    Text("${style.backgroundOpacity}%", style = MaterialTheme.typography.bodyLarge, color = motif.textMuted)
-                }
-                MotifSlider(style.backgroundOpacity / 100f) { save(style.copy(backgroundOpacity = (it * 100).toInt())) }
-            }
-            Hairline()
-            Column(Modifier.alphaCompat(dim)) {
-                SettingRow("Text size") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("S" to "Small", "M" to "Medium", "L" to "Large").forEach { (k, label) ->
-                            Chip(label, selected = style.textSize == k, enabled = own, onClick = { save(style.copy(textSize = k)) })
-                        }
-                    }
-                }
-                SettingRow("Border glow color") { Swatch(Color(style.glowColor)) { if (own) picking = "glow" } }
-                Column(Modifier.padding(vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Glow intensity", style = MaterialTheme.typography.bodyLarge, color = motif.text)
-                        Text("${style.glowIntensity}%", style = MaterialTheme.typography.bodyLarge, color = motif.textMuted)
-                    }
-                    MotifSlider(style.glowIntensity / 100f) { if (own) save(style.copy(glowIntensity = (it * 100).toInt())) }
-                }
-                Hairline()
-            }
+            SectionLabel("Look", Modifier.padding(bottom = 8.dp))
+            ChipRow("Background transparency", listOf(0, 25, 50, 75).map { "$it%" to (cfg.transparency == it) }) { i -> save(cfg.copy(transparency = listOf(0, 25, 50, 75)[i])) }
+            ChipRow("Text size", listOf("S", "M", "L").map { it to (cfg.textSize == it) }) { i -> save(cfg.copy(textSize = listOf("S", "M", "L")[i])) }
+            Text(
+                "The card is the app's ground color at the chosen transparency; text follows the app's text color and the progress bar uses the gold accent. Each widget keeps its own setup; long press the widget and choose Settings to come back here.",
+                style = MaterialTheme.typography.bodySmall, color = motif.textMuted, modifier = Modifier.padding(top = 10.dp), lineHeight = 18.sp,
+            )
         }
     }
-
-    picking?.let { which ->
-        val current = when (which) { "text" -> style.textColor; "bg" -> style.backgroundColor; else -> style.glowColor }
-        ColorSheet(
-            title = when (which) { "text" -> "Text color"; "bg" -> "Background color"; else -> "Border glow color" },
-            current = Color(current),
-            onPick = { c ->
-                val argb = c.toArgb()
-                save(when (which) { "text" -> style.copy(textColor = argb); "bg" -> style.copy(backgroundColor = argb); else -> style.copy(glowColor = argb) })
-            },
-            onDismiss = { picking = null },
-        )
-    }
 }
-
-private fun Modifier.alphaCompat(a: Float): Modifier = if (a >= 1f) this else this.alpha(a)

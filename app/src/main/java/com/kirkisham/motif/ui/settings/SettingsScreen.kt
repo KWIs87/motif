@@ -23,8 +23,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -50,11 +48,10 @@ import com.kirkisham.motif.ui.MINI_PLAYER_SPACE
 import com.kirkisham.motif.ui.motif
 import kotlinx.coroutines.launch
 
-/** Settings (board Settings), Build 1 subset: Appearance plus the "Widget uses these settings" switch. */
+/** Settings (board Settings), Build 1 subset: Appearance, then Updates. The widget's own options live on its setup screen (0.12). */
 @Composable
 fun SettingsScreen(app: MotifApp, onBack: () -> Unit) {
     val appearance by app.prefs.appearance.collectAsStateWithLifecycle(Appearance())
-    val widgetUsesApp by app.prefs.widgetUsesApp.collectAsStateWithLifecycle(true)
     val update by app.updates.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var picking by remember { mutableStateOf<String?>(null) } // "text", "bg", "glow"
@@ -88,21 +85,6 @@ fun SettingsScreen(app: MotifApp, onBack: () -> Unit) {
                 MotifSlider(appearance.glowIntensity / 100f) { save(appearance.copy(glowIntensity = (it * 100).toInt())) }
             }
             Hairline()
-        }
-
-        Column(Modifier.padding(start = 8.dp)) {
-            SectionLabel("Widget", Modifier.padding(bottom = 8.dp))
-            SettingRow("Widget uses these settings") {
-                Switch(
-                    checked = widgetUsesApp,
-                    onCheckedChange = { on -> scope.launch { app.prefs.setWidgetUsesApp(on) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = motif.accent, checkedThumbColor = motif.ground, uncheckedTrackColor = motif.card, uncheckedThumbColor = motif.textMuted, uncheckedBorderColor = motif.chipLine),
-                )
-            }
-            Text(
-                "Off: the widget keeps its own colors, size and glow, set from the widget itself. Background opacity is set on the widget only.",
-                style = MaterialTheme.typography.bodySmall, color = motif.textMuted, modifier = Modifier.padding(top = 10.dp), lineHeight = 18.sp,
-            )
         }
 
         // Updates (board Settings, bottom). The Improvement report section is parked and not shown.

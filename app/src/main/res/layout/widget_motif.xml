@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Widget 4x2 (board Widget): card, art, title, artist, previous / play-pause / next. Nothing else.
-     Sized to fit 180x90 dp (Samsung's smaller grid cells): the provider hides the art and the artist
-     line below about 110 dp of height and previous/next below about 150 dp of width. -->
+<!-- Widget 4x2 (0.12, spec §3.9): card, then four rows — title, "Artist · Album", elapsed · 3 dp progress ·
+     remaining, and centred previous / play-pause / next as thin outlined glyphs. Optional 40 dp art at the
+     left of the text. Padding and gaps are tight on purpose (the owner asked for ~30 % less than the render).
+     The provider hides the album line and the progress row when the launcher reports a short cell, and
+     previous/next when it reports a narrow one. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
@@ -15,14 +17,6 @@
         android:src="@drawable/widget_bg"
         android:importantForAccessibility="no" />
 
-    <ImageView
-        android:id="@+id/widget_glow"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:scaleType="fitXY"
-        android:src="@drawable/widget_glow"
-        android:importantForAccessibility="no" />
-
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -30,13 +24,13 @@
         android:paddingStart="12dp"
         android:paddingEnd="12dp"
         android:paddingTop="8dp"
-        android:paddingBottom="8dp">
+        android:paddingBottom="6dp">
 
+        <!-- Rows 1–2: optional art, then title and artist · album. Tapping opens Now playing. -->
         <LinearLayout
-            android:id="@+id/widget_text_row"
+            android:id="@+id/widget_text"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
+            android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
@@ -44,13 +38,13 @@
                 android:id="@+id/widget_art"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:layout_marginEnd="12dp"
+                android:layout_marginEnd="10dp"
                 android:background="@drawable/widget_art_bg"
                 android:scaleType="centerCrop"
-                android:contentDescription="Widget settings" />
+                android:visibility="gone"
+                android:importantForAccessibility="no" />
 
             <LinearLayout
-                android:id="@+id/widget_text"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -61,11 +55,10 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:ellipsize="end"
-                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:fontFamily="sans-serif-medium"
                     android:textColor="#E8E6E1"
                     android:textSize="15sp"
-                    android:textStyle="bold"
-                    android:fontFamily="sans-serif-medium"
                     android:text="Motif" />
 
                 <TextView
@@ -74,7 +67,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="1dp"
                     android:ellipsize="end"
-                    android:maxLines="1"
+                    android:singleLine="true"
                     android:alpha="0.6"
                     android:textColor="#E8E6E1"
                     android:textSize="12sp"
@@ -82,77 +75,99 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Three equal cells so the buttons spread with the width and still fit at 180 dp. -->
+        <!-- Spacer so the progress row sits between the text and the buttons whatever the height. -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <!-- Row 3: elapsed · progress · remaining -->
+        <LinearLayout
+            android:id="@+id/widget_progress_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/widget_elapsed"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="30dp"
+                android:layout_marginEnd="8dp"
+                android:alpha="0.6"
+                android:singleLine="true"
+                android:textColor="#E8E6E1"
+                android:textSize="11sp"
+                android:text="0:00" />
+
+            <ProgressBar
+                android:id="@+id/widget_progress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="0dp"
+                android:layout_height="3dp"
+                android:layout_weight="1"
+                android:max="1000"
+                android:progress="0"
+                android:progressDrawable="@drawable/widget_progress" />
+
+            <TextView
+                android:id="@+id/widget_remaining"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="30dp"
+                android:layout_marginStart="8dp"
+                android:gravity="end"
+                android:alpha="0.6"
+                android:singleLine="true"
+                android:textColor="#E8E6E1"
+                android:textSize="11sp"
+                android:text="-0:00" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <!-- Row 4: previous / play-pause / next, centred, 44 dp targets, 12 dp apart. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="44dp"
-            android:layout_marginTop="4dp"
+            android:gravity="center"
             android:orientation="horizontal">
 
-            <FrameLayout
-                android:id="@+id/widget_prev_cell"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1">
+            <ImageButton
+                android:id="@+id/widget_prev"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginEnd="12dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Previous"
+                android:padding="9dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_prev" />
 
-                <ImageButton
-                    android:id="@+id/widget_prev"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
-                    android:layout_gravity="center"
-                    android:background="@android:color/transparent"
-                    android:contentDescription="Previous"
-                    android:padding="11dp"
-                    android:scaleType="fitCenter"
-                    android:src="@drawable/ic_prev" />
-            </FrameLayout>
+            <ImageButton
+                android:id="@+id/widget_play"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Play or pause"
+                android:padding="5dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_play" />
 
-            <FrameLayout
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1">
-
-                <FrameLayout
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
-                    android:layout_gravity="center">
-
-                    <ImageView
-                        android:id="@+id/widget_play_bg"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:src="@drawable/widget_circle"
-                        android:importantForAccessibility="no" />
-
-                    <ImageButton
-                        android:id="@+id/widget_play"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:background="@android:color/transparent"
-                        android:contentDescription="Play or pause"
-                        android:padding="12dp"
-                        android:scaleType="fitCenter"
-                        android:src="@drawable/ic_play" />
-                </FrameLayout>
-            </FrameLayout>
-
-            <FrameLayout
-                android:id="@+id/widget_next_cell"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1">
-
-                <ImageButton
-                    android:id="@+id/widget_next"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
-                    android:layout_gravity="center"
-                    android:background="@android:color/transparent"
-                    android:contentDescription="Next"
-                    android:padding="11dp"
-                    android:scaleType="fitCenter"
-                    android:src="@drawable/ic_next" />
-            </FrameLayout>
+            <ImageButton
+                android:id="@+id/widget_next"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="12dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Next"
+                android:padding="9dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_next" />
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>

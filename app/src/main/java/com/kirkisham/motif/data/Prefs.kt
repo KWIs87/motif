@@ -31,16 +31,20 @@ data class Appearance(
     val textScale: Float get() = when (textSize) { "S" -> 0.9f; "L" -> 1.15f; else -> 1f }
 }
 
-/** The widget's own settings, used when "Widget uses app settings" is off. */
+/**
+ * One widget instance's setup (0.12), chosen on the setup screen shown at placement and from the
+ * launcher's widget settings; stored per appWidgetId. Colors are not options: the card is #121212
+ * at [transparency], text follows the app's Appearance text color, the progress accent is the app accent.
+ */
 @Serializable
-data class WidgetStyle(
-    val textColor: Int = 0xFFE8E6E1.toInt(),
-    val backgroundColor: Int = 0xFF1A1A1A.toInt(),
-    /** 0..100 */
-    val backgroundOpacity: Int = 100,
+data class WidgetConfig(
+    val showAlbum: Boolean = true,
+    val showTimes: Boolean = true,
+    /** 0, 25, 50 or 75 (% of the card that is see-through). */
+    val transparency: Int = 0,
+    /** S, M or L. */
     val textSize: String = "M",
-    val glowColor: Int = 0xFFC9A96E.toInt(),
-    val glowIntensity: Int = 20,
+    val showArt: Boolean = false,
 )
 
 /** The last podcast episode Motif saw playing, so Home can offer it again. */
@@ -68,8 +72,7 @@ class Prefs(private val context: Context) {
         val lastEpisode = stringPreferencesKey("last_episode")
         val podcastSpeeds = stringPreferencesKey("podcast_speeds") // JSON map show uri -> speed
         val appearance = stringPreferencesKey("appearance")
-        val widgetStyle = stringPreferencesKey("widget_style")
-        val widgetUsesApp = booleanPreferencesKey("widget_uses_app")
+        fun widgetConfig(id: Int) = stringPreferencesKey("widget_cfg_$id")
         val permissionsAsked = booleanPreferencesKey("permissions_asked")
         val locationAsked = booleanPreferencesKey("location_asked")
         val updateCheckedAt = longPreferencesKey("update_checked_at")
@@ -93,8 +96,7 @@ class Prefs(private val context: Context) {
     val lastEpisode: Flow<LastEpisode?> = store.data.map { p -> p[K.lastEpisode]?.let { runCatching { json.decodeFromString<LastEpisode>(it) }.getOrNull() } }
     val podcastSpeeds: Flow<Map<String, Float>> = store.data.map { p -> p[K.podcastSpeeds]?.let { runCatching { json.decodeFromString<Map<String, Float>>(it) }.getOrNull() } ?: emptyMap() }
     val appearance: Flow<Appearance> = store.data.map { p -> p[K.appearance]?.let { runCatching { json.decodeFromString<Appearance>(it) }.getOrNull() } ?: Appearance() }
-    val widgetStyle: Flow<WidgetStyle> = store.data.map { p -> p[K.widgetStyle]?.let { runCatching { json.decodeFromString<WidgetStyle>(it) }.getOrNull() } ?: WidgetStyle() }
-    val widgetUsesApp: Flow<Boolean> = store.data.map { it[K.widgetUsesApp] ?: true }
+    fun widgetConfig(id: Int): Flow<WidgetConfig> = store.data.map { p -> p[K.widgetConfig(id)]?.let { runCatching { json.decodeFromString<WidgetConfig>(it) }.getOrNull() } ?: WidgetConfig() }
     val permissionsAsked: Flow<Boolean> = store.data.map { it[K.permissionsAsked] ?: false }
     val locationAsked: Flow<Boolean> = store.data.map { it[K.locationAsked] ?: false }
     val updateCheckedAt: Flow<Long> = store.data.map { it[K.updateCheckedAt] ?: 0L }
@@ -146,8 +148,9 @@ class Prefs(private val context: Context) {
     }
 
     suspend fun setAppearance(a: Appearance) = store.edit { it[K.appearance] = json.encodeToString(a) }
-    suspend fun setWidgetStyle(w: WidgetStyle) = store.edit { it[K.widgetStyle] = json.encodeToString(w) }
-    suspend fun setWidgetUsesApp(on: Boolean) = store.edit { it[K.widgetUsesApp] = on }
+    suspend fun setWidgetConfig(id: Int, c: WidgetConfig) = store.edit { it[K.widgetConfig(id)] = json.encodeToString(c) }
+    /** When the launcher removes widget instances. */
+    suspend fun deleteWidgetConfigs(ids: IntArray) = store.edit { p -> ids.forEach { p.remove(K.widgetConfig(it)) } }
     suspend fun setPermissionsAsked() = store.edit { it[K.permissionsAsked] = true }
     suspend fun setLocationAsked() = store.edit { it[K.locationAsked] = true }
     suspend fun setUpdateCheckedAt(ms: Long) = store.edit { it[K.updateCheckedAt] = ms }
@@ -169,8 +172,7 @@ class Prefs(private val context: Context) {
     }
 
     suspend fun appearanceNow(): Appearance = appearance.first()
-    suspend fun widgetStyleNow(): WidgetStyle = widgetStyle.first()
-    suspend fun widgetUsesAppNow(): Boolean = widgetUsesApp.first()
+    suspend fun widgetConfigNow(id: Int): WidgetConfig = widgetConfig(id).first()
 
     private fun decodeList(s: String?): List<String> =
         s?.let { runCatching { json.decodeFromString<List<String>>(it) }.getOrNull() } ?: emptyList()

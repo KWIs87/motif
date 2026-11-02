@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Solid rounded card, tinted and faded from code (RemoteViews setColorFilter / setImageAlpha). -->
+<!-- Widget card (0.12): #121212, radius 14 dp; the configured transparency is applied from code with setImageAlpha. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#FFFFFFFF" />
-    <corners android:radius="22dp" />
+    <solid android:color="#FF121212" />
+    <corners android:radius="14dp" />
 </shape>

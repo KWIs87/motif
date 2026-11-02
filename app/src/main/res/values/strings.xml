@@ -1,4 +1,4 @@
 <resources>
     <string name="app_name">Motif</string>
-    <string name="widget_description">Now playing: title, artist, previous, play/pause, next.</string>
+    <string name="widget_description">Now playing: title, artist · album, progress, previous, play/pause, next.</string>
 </resources>
