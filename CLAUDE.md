@@ -10,6 +10,7 @@ layout and behavior: https://claude.ai/artifact/9Ub5hBHd5zAiG92wTZwdSu
 ## Stack
 - Kotlin, Jetpack Compose, Material 3 with the Motif palette in `ui/Theme.kt`. minSdk 26, target 35.
 - Spotify Web API over OkHttp + kotlinx.serialization (`auth/SpotifyApi.kt`), PKCE login in `auth/SpotifyAuth.kt`.
+- Use the Feb 2026 endpoints: /playlists/{id}/items, /me/playlists, /me/library; playlist rows are items.item.
 - Spotify App Remote SDK for playback. The AARs are fetched into `app/libs/` by CI (see
   `.github/workflows/build.yml`); locally, download them from github.com/spotify/android-sdk/releases.
 - Builds run on GitHub Actions. Every push to `main` produces a signed APK attached to the

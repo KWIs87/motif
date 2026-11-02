@@ -64,7 +64,7 @@ fun AllPlaylistsScreen(
         val rest = all.filterNot { it.id in pinSet }.withIndex().sortedWith(
             when (sort) {
                 "Name" -> compareBy<IndexedValue<SpPlaylist>> { it.value.name.lowercase() }
-                "Songs" -> compareByDescending<IndexedValue<SpPlaylist>> { it.value.trackCount }.thenBy { it.index }
+                "Songs" -> compareByDescending<IndexedValue<SpPlaylist>> { it.value.itemCount ?: -1 }.thenBy { it.index }
                 else -> compareByDescending<IndexedValue<SpPlaylist>> { lastPlayed[it.value.id] ?: 0L }.thenBy { it.index }
             },
         ).map { it.value }
@@ -108,7 +108,7 @@ fun AllPlaylistsScreen(
 private fun PlaylistRow(p: SpPlaylist, pinned: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     ListRow(
         title = p.name,
-        subtitle = pluralSongs(p.trackCount),
+        subtitle = p.itemCount?.let(::pluralSongs),
         coverUrl = p.smallCoverUrl,
         onClick = onClick,
         onLongClick = onLongClick,

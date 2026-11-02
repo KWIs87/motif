@@ -47,10 +47,26 @@ class Library(private val api: SpotifyApi) {
     fun tracksFlow(playlistId: String): StateFlow<List<SpPlaylistItem>?> =
         tracksCache.getOrPut(playlistId) { MutableStateFlow(null) }.asStateFlow()
 
+    /**
+     * Loads a playlist's rows. Spotify only shares the contents of playlists the user owns or
+     * collaborates on (February 2026); for the rest the cache is set to an empty list so the screen
+     * can show its "not shared" line instead of loading forever. See [contentsShared].
+     */
     suspend fun refreshTracks(playlistId: String) {
-        val items = api.playlistTracks(playlistId) ?: return
-        tracksCache.getOrPut(playlistId) { MutableStateFlow(null) }.value = items.filter { it.track != null }
+        val flow = tracksCache.getOrPut(playlistId) { MutableStateFlow(null) }
+        val items = api.playlistTracks(playlistId)
+        if (items == null) {
+            if (contentsShared(playlistId) == false && flow.value == null) flow.value = emptyList()
+            return
+        }
+        flow.value = items.filter { it.item != null }
     }
+
+    /**
+     * Whether Spotify shares this playlist's contents with Motif: true when the playlist object
+     * carried an `items` field, false when it did not, null when the playlist is not known yet.
+     */
+    fun contentsShared(playlistId: String): Boolean? = (playlistById(playlistId) ?: foreign[playlistId])?.hasItems
 
     fun playlistById(id: String): SpPlaylist? = _playlists.value?.firstOrNull { it.id == id }
 
@@ -61,14 +77,14 @@ class Library(private val api: SpotifyApi) {
     }
 
     suspend fun unfollow(id: String): Boolean {
-        val ok = api.unfollowPlaylist(id)
+        val uri = playlistById(id)?.uri ?: "spotify:playlist:$id"
+        val ok = api.unfollowPlaylist(uri)
         if (ok) _playlists.value = _playlists.value?.filterNot { it.id == id }
         return ok
     }
 
     suspend fun create(name: String): SpPlaylist? {
-        val uid = userId() ?: return null
-        val p = api.createPlaylist(uid, name) ?: return null
+        val p = api.createPlaylist(name) ?: return null
         _playlists.value = listOf(p) + (_playlists.value ?: emptyList())
         return p
     }
@@ -85,7 +101,7 @@ class Library(private val api: SpotifyApi) {
         }
         if (added > 0) {
             _playlists.value = _playlists.value?.map {
-                if (it.id == playlistId) it.copy(tracks = SpTracksRef((it.tracks?.total ?: 0) + added)) else it
+                if (it.id == playlistId) it.withCount((it.itemCount ?: 0) + added) else it
             }
             tracksCache[playlistId]?.value = null // reload next time it is opened
         }
@@ -101,10 +117,10 @@ class Library(private val api: SpotifyApi) {
                 val set = chunk.toSet()
                 tracksCache[playlistId]?.let { f ->
                     val before = f.value?.size ?: 0
-                    f.value = f.value?.filterNot { it.track?.uri in set }
+                    f.value = f.value?.filterNot { it.item?.uri in set }
                     val gone = before - (f.value?.size ?: 0)
                     _playlists.value = _playlists.value?.map {
-                        if (it.id == playlistId) it.copy(tracks = SpTracksRef(maxOf(0, (it.tracks?.total ?: gone) - gone))) else it
+                        if (it.id == playlistId) it.withCount((it.itemCount ?: gone) - gone) else it
                     }
                 }
             } else ok = false
@@ -135,7 +151,7 @@ class Library(private val api: SpotifyApi) {
         if (ops.isNotEmpty()) {
             refreshTracks(playlistId)
             val n = tracksCache[playlistId]?.value?.size
-            if (n != null) _playlists.value = _playlists.value?.map { if (it.id == playlistId) it.copy(tracks = SpTracksRef(n)) else it }
+            if (n != null) _playlists.value = _playlists.value?.map { if (it.id == playlistId) it.withCount(n) else it }
         }
         return ok
     }
@@ -148,9 +164,9 @@ class Library(private val api: SpotifyApi) {
     suspend fun removeTrack(playlistId: String, trackUri: String): Boolean {
         val ok = api.removeFromPlaylist(playlistId, listOf(trackUri))
         if (ok) {
-            tracksCache[playlistId]?.let { f -> f.value = f.value?.filterNot { it.track?.uri == trackUri } }
+            tracksCache[playlistId]?.let { f -> f.value = f.value?.filterNot { it.item?.uri == trackUri } }
             _playlists.value = _playlists.value?.map {
-                if (it.id == playlistId) it.copy(tracks = SpTracksRef(maxOf(0, (it.tracks?.total ?: 1) - 1))) else it
+                if (it.id == playlistId) it.withCount((it.itemCount ?: 1) - 1) else it
             }
         }
         return ok

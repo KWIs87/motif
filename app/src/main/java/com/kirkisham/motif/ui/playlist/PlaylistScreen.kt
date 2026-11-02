@@ -66,6 +66,7 @@ import com.kirkisham.motif.ui.components.MenuItem
 import com.kirkisham.motif.ui.components.MenuSheet
 import com.kirkisham.motif.ui.components.MiniPlayer
 import com.kirkisham.motif.ui.components.NameSheet
+import com.kirkisham.motif.ui.components.NOT_SHARED_LINE
 import com.kirkisham.motif.ui.components.PlainLine
 import com.kirkisham.motif.ui.components.SectionLabel
 import com.kirkisham.motif.ui.components.SongMenuSheet
@@ -115,25 +116,27 @@ fun PlaylistScreen(
     var line by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(playlistId) {
-        if (items == null) app.library.refreshTracks(playlistId)
         if (playlist == null) {
             app.library.refreshPlaylists()
             if (app.library.playlistById(playlistId) == null) foreign = app.library.playlistOrFetch(playlistId)
         }
+        if (items == null) app.library.refreshTracks(playlistId)
     }
+    // Spotify (February 2026) only shares the contents of playlists the user owns or collaborates on.
+    val notShared = playlist != null && !playlist.hasItems && items.isNullOrEmpty()
 
     // Display order: Spotify's own order under Custom, otherwise sorted. Each entry keeps its Spotify index.
     val source = items ?: emptyList()
     val displayed = remember(source, sort) {
         val indexed = source.withIndex().toList()
         when (sort) {
-            "Name" -> indexed.sortedBy { it.value.track?.name?.lowercase() ?: "" }
-            "Artist" -> indexed.sortedWith(compareBy({ it.value.track?.artistNames?.lowercase() ?: "" }, { it.value.track?.name?.lowercase() ?: "" }))
-            "Length" -> indexed.sortedBy { it.value.track?.duration_ms ?: 0L }
+            "Name" -> indexed.sortedBy { it.value.item?.name?.lowercase() ?: "" }
+            "Artist" -> indexed.sortedWith(compareBy({ it.value.item?.artistNames?.lowercase() ?: "" }, { it.value.item?.name?.lowercase() ?: "" }))
+            "Length" -> indexed.sortedBy { it.value.item?.duration_ms ?: 0L }
             else -> indexed
         }
     }
-    val totalMs = source.sumOf { it.track?.duration_ms ?: 0L }
+    val totalMs = source.sumOf { it.item?.duration_ms ?: 0L }
 
     // Drag to reorder: the dragged row follows the finger; neighbours shift as it passes them.
     val density = LocalDensity.current
@@ -150,7 +153,7 @@ fun PlaylistScreen(
         dragIndex = -1; dragShift = 0; dragOffset = 0f; dragMoved = false
         if (from < 0) return
         if (!moved && shift == 0) {
-            menuTrack = displayed.getOrNull(from)?.value?.track
+            menuTrack = displayed.getOrNull(from)?.value?.item
             return
         }
         val toDisplay = (from + shift).coerceIn(0, displayed.lastIndex)
@@ -187,7 +190,11 @@ fun PlaylistScreen(
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(playlist?.name ?: "", style = MaterialTheme.typography.titleLarge, color = motif.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(
-                            if (items == null) pluralSongs(playlist?.trackCount ?: 0) else "${pluralSongs(source.size)} · ${formatLength(totalMs)}",
+                            when {
+                                notShared -> playlist?.owner?.display_name?.takeIf { it.isNotBlank() }?.let { "by $it" } ?: ""
+                                items == null -> playlist?.itemCount?.let(::pluralSongs) ?: ""
+                                else -> "${pluralSongs(source.size)} · ${formatLength(totalMs)}"
+                            },
                             style = MaterialTheme.typography.bodySmall, color = motif.textMuted,
                         )
                     }
@@ -203,11 +210,12 @@ fun PlaylistScreen(
                     SORTS.forEach { s -> Chip(s, selected = sort == s, onClick = { scope.launch { app.prefs.setPlaylistSort(playlistId, s) } }) }
                 }
                 line?.let { PlainLine(it, Modifier.padding(start = 8.dp)) }
-                if (items == null) PlainLine("Loading songs", Modifier.padding(start = 8.dp))
+                if (notShared) PlainLine(NOT_SHARED_LINE, Modifier.padding(start = 8.dp))
+                else if (items == null) PlainLine("Loading songs", Modifier.padding(start = 8.dp))
                 else if (source.isEmpty()) PlainLine("No songs in this playlist yet.", Modifier.padding(start = 8.dp))
             }
-            itemsIndexed(displayed, key = { i, it -> "${it.index}-${it.value.track?.uri}-$i" }) { displayIndex, entry ->
-                val track = entry.value.track ?: return@itemsIndexed
+            itemsIndexed(displayed, key = { i, it -> "${it.index}-${it.value.item?.uri}-$i" }) { displayIndex, entry ->
+                val track = entry.value.item ?: return@itemsIndexed
                 val isDragging = dragIndex == displayIndex
                 // Rows between the drag origin and its current slot step one row the other way.
                 val shiftPx = when {

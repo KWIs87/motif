@@ -243,3 +243,7 @@ fun formatLength(ms: Long): String {
 }
 
 fun pluralSongs(n: Int) = if (n == 1) "1 song" else "$n songs"
+
+/** Shown in place of a song list when Spotify withholds a playlist's contents (February 2026 Dev Mode rule). */
+const val NOT_SHARED_LINE = "Spotify only shares the contents of playlists you own or collaborate on"
+

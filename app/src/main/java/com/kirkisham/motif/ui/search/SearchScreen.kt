@@ -212,7 +212,7 @@ private fun LazyListScope.results(
             val by = p.owner?.display_name?.takeIf { it.isNotBlank() }
             ListRow(
                 title = p.name,
-                subtitle = listOfNotNull(pluralSongs(p.trackCount).takeIf { p.trackCount > 0 }, by).joinToString(" · "),
+                subtitle = listOfNotNull(p.itemCount?.takeIf { it > 0 }?.let(::pluralSongs), by).joinToString(" · "),
                 coverUrl = p.smallCoverUrl,
                 onClick = { onOpenPlaylist(p.id) },
                 coverSize = 40.dp,

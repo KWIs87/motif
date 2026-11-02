@@ -163,7 +163,7 @@ private const val RECENT_ON_HOME = 6
 private fun PlaylistRow(p: SpPlaylist, pinned: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     ListRow(
         title = p.name,
-        subtitle = pluralSongs(p.trackCount),
+        subtitle = p.itemCount?.let(::pluralSongs),
         coverUrl = p.smallCoverUrl,
         onClick = onClick,
         onLongClick = onLongClick,

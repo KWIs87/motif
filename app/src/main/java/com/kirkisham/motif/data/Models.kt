@@ -1,5 +1,6 @@
 package com.kirkisham.motif.data
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /** Spotify Web API shapes Motif reads. Only the fields used are declared; the rest are ignored. */
@@ -13,12 +14,18 @@ data class SpOwner(val id: String, val display_name: String? = null)
 @Serializable
 data class SpTracksRef(val total: Int = 0)
 
+/**
+ * Playlist. Since Spotify's February 2026 Dev Mode changes the contents field is `items` and it is
+ * only present for playlists the user owns or collaborates on; `tracks` is kept as a fallback for
+ * the old shape. [itemCount] is null when Spotify did not share the contents.
+ */
 @Serializable
 data class SpPlaylist(
     val id: String,
     val name: String,
     val uri: String,
     val images: List<SpImage>? = null,
+    val items: SpTracksRef? = null,
     val tracks: SpTracksRef? = null,
     val owner: SpOwner? = null,
     val snapshot_id: String? = null,
@@ -26,7 +33,12 @@ data class SpPlaylist(
 ) {
     val coverUrl: String? get() = images?.firstOrNull()?.url
     val smallCoverUrl: String? get() = images?.minByOrNull { it.width ?: Int.MAX_VALUE }?.url ?: coverUrl
-    val trackCount: Int get() = tracks?.total ?: 0
+    /** Number of items, or null when Spotify withholds the contents (not owned or collaborative). */
+    val itemCount: Int? get() = (items ?: tracks)?.total
+    /** True when Spotify shares this playlist's contents with the app. */
+    val hasItems: Boolean get() = items != null || tracks != null
+    /** Same playlist with a new item count, keeping the `items` shape. */
+    fun withCount(n: Int): SpPlaylist = copy(items = SpTracksRef(maxOf(0, n)), tracks = null)
 }
 
 @Serializable
@@ -36,6 +48,7 @@ data class SpArtist(
     val id: String? = null,
     /** Present on full artist objects (GET /artists/{id}, search). */
     val images: List<SpImage>? = null,
+    /** Absent for Dev Mode apps since February 2026; treated as empty. */
     val genres: List<String>? = null,
 ) {
     val imageUrl: String? get() = images?.firstOrNull()?.url
@@ -68,8 +81,16 @@ data class SpTrack(
     val smallCoverUrl: String? get() = album?.images?.minByOrNull { it.width ?: Int.MAX_VALUE }?.url ?: coverUrl
 }
 
+/** One playlist row. Spotify renamed the row's `track` to `item` in February 2026; both keys are accepted. */
 @Serializable
-data class SpPlaylistItem(val added_at: String? = null, val track: SpTrack? = null)
+data class SpPlaylistItem(
+    val added_at: String? = null,
+    @SerialName("item") private val newItem: SpTrack? = null,
+    @SerialName("track") private val oldTrack: SpTrack? = null,
+) {
+    /** The row's track or episode (`item.type` tells which). */
+    val item: SpTrack? get() = newItem ?: oldTrack
+}
 
 @Serializable
 data class SpPage<T>(

@@ -85,7 +85,7 @@ fun MassEditScreen(app: MotifApp, playlistId: String, onClose: () -> Unit) {
     LaunchedEffect(source) { if (order == null && source != null) order = source }
 
     val rows = order ?: emptyList()
-    fun keyOf(i: Int, item: SpPlaylistItem) = "${item.track?.uri}#${item.added_at}#$i"
+    fun keyOf(i: Int, item: SpPlaylistItem) = "${item.item?.uri}#${item.added_at}#$i"
 
     // Drag by handle: same mechanics as the Playlist screen's long-press drag.
     val density = LocalDensity.current
@@ -111,11 +111,11 @@ fun MassEditScreen(app: MotifApp, playlistId: String, onClose: () -> Unit) {
     }
 
     fun removeSelected() {
-        val uris = rows.filterIndexed { i, it -> keyOf(i, it) in selected }.mapNotNull { it.track?.uri }.distinct()
+        val uris = rows.filterIndexed { i, it -> keyOf(i, it) in selected }.mapNotNull { it.item?.uri }.distinct()
         if (uris.isEmpty()) return
         val set = uris.toSet()
         // Spotify removes by URI, so every copy of a selected song goes, selected or not.
-        order = rows.filterNot { it.track?.uri in set }
+        order = rows.filterNot { it.item?.uri in set }
         ops += Library.EditOp.Remove(uris)
         selected = emptySet()
     }
@@ -153,7 +153,7 @@ fun MassEditScreen(app: MotifApp, playlistId: String, onClose: () -> Unit) {
                 else if (rows.isEmpty()) PlainLine("No songs in this playlist.", Modifier.padding(start = 8.dp))
             }
             itemsIndexed(rows, key = { i, it -> keyOf(i, it) }) { index, item ->
-                val track = item.track ?: return@itemsIndexed
+                val track = item.item ?: return@itemsIndexed
                 val key = keyOf(index, item)
                 val isSelected = key in selected
                 val isDragging = dragIndex == index
@@ -229,8 +229,8 @@ fun MassEditScreen(app: MotifApp, playlistId: String, onClose: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium, color = motif.textMuted, modifier = Modifier.weight(1f), maxLines = 1,
             )
             BarButton("Add to", enabled = selectedCount > 0 && !saving, color = motif.text, lineColor = motif.chipLine) {
-                val uris = rows.filterIndexed { i, it -> keyOf(i, it) in selected }.mapNotNull { it.track?.uri }.distinct()
-                addTarget = AddTarget(uris, if (uris.size == 1) rows.first { it.track?.uri == uris[0] }.track?.name ?: "1 song" else "${uris.size} songs")
+                val uris = rows.filterIndexed { i, it -> keyOf(i, it) in selected }.mapNotNull { it.item?.uri }.distinct()
+                addTarget = AddTarget(uris, if (uris.size == 1) rows.first { it.item?.uri == uris[0] }.item?.name ?: "1 song" else "${uris.size} songs")
             }
             BarButton("Remove", enabled = selectedCount > 0 && !saving, color = Red, lineColor = RedLine, onClick = ::removeSelected)
         }

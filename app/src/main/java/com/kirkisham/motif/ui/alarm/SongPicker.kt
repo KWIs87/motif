@@ -44,6 +44,7 @@ import com.kirkisham.motif.ui.components.Hairline
 import com.kirkisham.motif.ui.components.IconButton44
 import com.kirkisham.motif.ui.components.MotifTextField
 import com.kirkisham.motif.ui.components.PillButton
+import com.kirkisham.motif.ui.components.NOT_SHARED_LINE
 import com.kirkisham.motif.ui.components.PlainLine
 import com.kirkisham.motif.ui.components.SectionLabel
 import com.kirkisham.motif.ui.components.formatClock
@@ -93,8 +94,9 @@ fun SongPickerSheet(app: MotifApp, chosen: List<AlarmSong>, onAdd: (AlarmSong) -
             LazyColumn(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 4.dp)) {
                 val b = browsing
                 if (b != null) {
-                    val tracks = browseItems?.mapNotNull { it.track } ?: emptyList()
+                    val tracks = browseItems?.mapNotNull { it.item } ?: emptyList()
                     if (browseItems == null) item { PlainLine("Loading songs") }
+                    else if (tracks.isEmpty() && !b.hasItems) item { PlainLine(NOT_SHARED_LINE) }
                     items(tracks, key = { it.uri + it.id }) { t -> TrackPick(t, t.uri in chosenUris) { onAdd(t.toAlarmSong()) } }
                 } else if (query.isNotBlank()) {
                     val r = results
@@ -111,7 +113,7 @@ fun SongPickerSheet(app: MotifApp, chosen: List<AlarmSong>, onAdd: (AlarmSong) -
                             Cover(p.smallCoverUrl, 36.dp, radius = 3.dp)
                             Column(Modifier.weight(1f)) {
                                 Text(p.name, style = MaterialTheme.typography.titleMedium, color = motif.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(pluralSongs(p.trackCount), style = MaterialTheme.typography.bodySmall, color = motif.textMuted)
+                                p.itemCount?.let { Text(pluralSongs(it), style = MaterialTheme.typography.bodySmall, color = motif.textMuted) }
                             }
                         }
                         Hairline()
