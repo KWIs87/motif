@@ -6,6 +6,7 @@ import com.kirkisham.motif.alarm.AlarmStore
 import com.kirkisham.motif.auth.SpotifyApi
 import com.kirkisham.motif.auth.SpotifyAuth
 import com.kirkisham.motif.auth.TokenStore
+import com.kirkisham.motif.data.Info
 import com.kirkisham.motif.data.Library
 import com.kirkisham.motif.data.Lyrics
 import com.kirkisham.motif.data.PlaybackController
@@ -38,6 +39,8 @@ class MotifApp : Application() {
         private set
     lateinit var lyrics: Lyrics
         private set
+    lateinit var info: Info
+        private set
     lateinit var alarmStore: AlarmStore
         private set
     lateinit var alarmScheduler: AlarmScheduler
@@ -55,6 +58,7 @@ class MotifApp : Application() {
         remote = SpotifyRemote(this)
         player = PlaybackController(remote, prefs, library)
         lyrics = Lyrics()
+        info = Info(api)
         alarmStore = AlarmStore(this)
         alarmScheduler = AlarmScheduler(this, alarmStore)
 

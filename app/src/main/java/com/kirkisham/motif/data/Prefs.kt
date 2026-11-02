@@ -69,6 +69,7 @@ class Prefs(private val context: Context) {
         val widgetStyle = stringPreferencesKey("widget_style")
         val widgetUsesApp = booleanPreferencesKey("widget_uses_app")
         val permissionsAsked = booleanPreferencesKey("permissions_asked")
+        val locationAsked = booleanPreferencesKey("location_asked")
         val allSort = stringPreferencesKey("all_sort")
         val playlistSort = stringPreferencesKey("playlist_sort")   // JSON map playlist id -> sort name
     }
@@ -82,6 +83,7 @@ class Prefs(private val context: Context) {
     val widgetStyle: Flow<WidgetStyle> = store.data.map { p -> p[K.widgetStyle]?.let { runCatching { json.decodeFromString<WidgetStyle>(it) }.getOrNull() } ?: WidgetStyle() }
     val widgetUsesApp: Flow<Boolean> = store.data.map { it[K.widgetUsesApp] ?: true }
     val permissionsAsked: Flow<Boolean> = store.data.map { it[K.permissionsAsked] ?: false }
+    val locationAsked: Flow<Boolean> = store.data.map { it[K.locationAsked] ?: false }
     val allSort: Flow<String> = store.data.map { it[K.allSort] ?: "Recent" }
     val playlistSorts: Flow<Map<String, String>> = store.data.map { p -> p[K.playlistSort]?.let { runCatching { json.decodeFromString<Map<String, String>>(it) }.getOrNull() } ?: emptyMap() }
 
@@ -124,6 +126,7 @@ class Prefs(private val context: Context) {
     suspend fun setWidgetStyle(w: WidgetStyle) = store.edit { it[K.widgetStyle] = json.encodeToString(w) }
     suspend fun setWidgetUsesApp(on: Boolean) = store.edit { it[K.widgetUsesApp] = on }
     suspend fun setPermissionsAsked() = store.edit { it[K.permissionsAsked] = true }
+    suspend fun setLocationAsked() = store.edit { it[K.locationAsked] = true }
     suspend fun setAllSort(sort: String) = store.edit { it[K.allSort] = sort }
     suspend fun setPlaylistSort(playlistId: String, sort: String) = store.edit { p ->
         val cur = p[K.playlistSort]?.let { runCatching { json.decodeFromString<Map<String, String>>(it) }.getOrNull() }?.toMutableMap() ?: mutableMapOf()

@@ -100,7 +100,7 @@ fun MotifNavHost(
         composable(Routes.INFO) { entry ->
             val id = entry.arguments?.getString("id") ?: return@composable
             val kind = if (entry.arguments?.getString("kind") == "artist") InfoKind.ARTIST else InfoKind.TRACK
-            InfoScreen(app, kind, id, onBack = { nav.popBackStack() })
+            InfoScreen(app, kind, id, onBack = { nav.popBackStack() }, onSearch = { nav.navigate(Routes.search(it)) })
         }
         composable(Routes.ALL) {
             AllPlaylistsScreen(
@@ -124,7 +124,9 @@ fun MotifNavHost(
                 onOpenArtist = { a -> a.id?.let { nav.navigate(Routes.infoArtist(it)) } },
             )
         }
-        composable(Routes.NOW) { NowPlayingScreen(app, onBack = { nav.popBackStack() }) }
+        composable(Routes.NOW) {
+            NowPlayingScreen(app, onBack = { nav.popBackStack() }, onOpenInfo = { nav.navigate(Routes.infoTrack(it)) })
+        }
         composable(Routes.SETTINGS) { SettingsScreen(app, onBack = { nav.popBackStack() }) }
         composable(Routes.ALARM) { AlarmScreen(app, onBack = { nav.popBackStack() }) }
     }

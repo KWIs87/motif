@@ -90,7 +90,7 @@ private val SPEEDS = listOf(1f, 1.25f, 1.5f, 2f)
  * current item: songs get previous/next, plus and Lyrics; episodes get 15 s skips, speed and sleep.
  */
 @Composable
-fun NowPlayingScreen(app: MotifApp, onBack: () -> Unit) {
+fun NowPlayingScreen(app: MotifApp, onBack: () -> Unit, onOpenInfo: (String) -> Unit) {
     val playback by app.remote.playback.collectAsStateWithLifecycle()
     val contextTitle by app.remote.contextTitle.collectAsStateWithLifecycle()
     val notice by app.player.notice.collectAsStateWithLifecycle()
@@ -125,7 +125,7 @@ fun NowPlayingScreen(app: MotifApp, onBack: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         if (p.isEpisode) PodcastBody(app, p, positionMs, contextTitle, art, onBack, share)
-        else SongBody(app, p, positionMs, contextTitle, art, onBack, share)
+        else SongBody(app, p, positionMs, contextTitle, art, onBack, share, onOpenInfo = { onOpenInfo(p.uri.substringAfterLast(':')) })
         notice?.let { PlainLine(it) }
     }
 }
@@ -191,6 +191,7 @@ private fun ColumnScope.SongBody(
     art: android.graphics.Bitmap?,
     onBack: () -> Unit,
     onShare: () -> Unit,
+    onOpenInfo: () -> Unit,
 ) {
     var lyrics by remember { mutableStateOf<List<LyricLine>?>(null) }
     var showLyrics by remember { mutableStateOf(false) }
@@ -209,8 +210,11 @@ private fun ColumnScope.SongBody(
         IconButton44(Icons.Outlined.IosShare, "Share", onShare, tint = motif.textMuted, size = 20.dp)
     }
 
-    // Tap on the art: Song and artist info is Build 2, so a no-op for now (spec §3.6).
-    Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(8.dp)).background(motif.card)) {
+    // Tap on the art opens Song and artist info (spec §3.6); while lyrics show, tapping does nothing.
+    Box(
+        Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(8.dp)).background(motif.card)
+            .clickable(enabled = !showLyrics && p.uri.startsWith("spotify:track:"), onClick = onOpenInfo),
+    ) {
         val l = lyrics
         if (showLyrics && l != null) LyricsView(l, positionMs, Modifier.fillMaxSize())
         else if (art != null) Image(art.asImageBitmap(), null, Modifier.fillMaxSize())
