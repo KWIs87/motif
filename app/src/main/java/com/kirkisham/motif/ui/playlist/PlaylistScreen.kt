@@ -3,6 +3,8 @@ package com.kirkisham.motif.ui.playlist
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -74,13 +76,16 @@ import com.kirkisham.motif.ui.components.TopBar
 import com.kirkisham.motif.ui.components.formatLength
 import com.kirkisham.motif.ui.components.pluralSongs
 import com.kirkisham.motif.ui.motif
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-private val SORTS = listOf("Recent", "Name", "Artist", "Length", "Custom") // BPM chip hidden until Build 2 (spec §3.5)
-/** Natural direction per sort: Recent newest first, the rest A to Z / shortest first; Custom ▲ is the playlist's own order (0.11). */
-private fun naturalAscending(sort: String): Boolean? = when (sort) { "Recent" -> false; else -> true }
+private val SORTS = listOf("Recent", "Name", "Artist", "Length", "Plays", "Custom") // BPM chip hidden until Build 2 (spec §3.5)
+/** Natural direction per sort: Recent newest first, Plays most first, the rest A to Z / shortest first; Custom ▲ is the playlist's own order (0.11). */
+private fun naturalAscending(sort: String): Boolean? = when (sort) { "Recent", "Plays" -> false; else -> true }
 
 /**
  * Playlist (board Playlist): header, Play/Shuffle, sort chips, song rows.
@@ -102,6 +107,7 @@ fun PlaylistScreen(
     val sorts by app.prefs.playlistSorts.collectAsStateWithLifecycle(emptyMap())
     val reversedIds by app.prefs.playlistSortReversed.collectAsStateWithLifecycle(emptySet())
     val playback by app.remote.playback.collectAsStateWithLifecycle()
+    val playCounts by app.info.playCounts.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     // Playlists outside the library (opened from Search) are fetched once and kept for the session.
     var foreign by remember { mutableStateOf<SpPlaylist?>(null) }
@@ -130,7 +136,8 @@ fun PlaylistScreen(
 
     // Display order: Spotify's own order under Custom, otherwise sorted. Each entry keeps its Spotify index.
     val source = items ?: emptyList()
-    val displayed = remember(source, sort, reversed) {
+    val counts = if (sort == "Plays") playCounts else emptyMap()
+    val displayed = remember(source, sort, reversed, counts) {
         // Keep Spotify's index on every row (reorder/remove need it), but hide rows Spotify no longer returns
         // (removed catalog tracks, local files): they would render as a blank "0:00" line.
         val indexed = source.withIndex().filter { !it.value.item?.name.isNullOrBlank() }
@@ -139,9 +146,25 @@ fun PlaylistScreen(
             "Name" -> indexed.sortedBy { it.value.item?.name?.lowercase() ?: "" }
             "Artist" -> indexed.sortedWith(compareBy({ it.value.item?.artistNames?.lowercase() ?: "" }, { it.value.item?.name?.lowercase() ?: "" }))
             "Length" -> indexed.sortedBy { it.value.item?.duration_ms ?: 0L }
+            "Plays" -> {
+                // Known counts most-played first; songs without a count (still loading, or unknown to Last.fm) stay at the bottom in either direction.
+                val (known, unknown) = indexed.partition { (counts[it.value.item?.uri]?.plays ?: -1L) >= 0 }
+                val sorted = known.sortedByDescending { counts[it.value.item?.uri]?.plays ?: -1L }
+                return@remember (if (reversed) sorted.asReversed() else sorted) + unknown
+            }
             else -> indexed
         }
         if (reversed) natural.asReversed() else natural
+    }
+    // Sorting by Plays asks Last.fm for every song still without a count in the background, two at a
+    // time so the rows on screen (which fetch on their own) are not starved.
+    LaunchedEffect(sort, items) {
+        if (sort != "Plays") return@LaunchedEffect
+        val missing = source.mapNotNull { it.item }.filter { it.uri.isNotBlank() && app.info.playCounts.value[it.uri] == null }
+        coroutineScope {
+            val gate = Semaphore(2)
+            missing.forEach { t -> launch { gate.withPermit { app.info.playCount(t) } } }
+        }
     }
     val totalMs = source.sumOf { it.item?.duration_ms ?: 0L }
 
@@ -215,7 +238,8 @@ fun PlaylistScreen(
                     ) { Icon(Icons.Filled.PlayArrow, "Play", tint = motif.ground, modifier = Modifier.size(22.dp)) }
                 }
                 Spacer(Modifier.height(16.dp))
-                Row(Modifier.padding(start = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Six chips since 0.11 (Plays): the row scrolls sideways when the screen is too narrow for them all.
+                Row(Modifier.padding(start = 8.dp, bottom = 12.dp).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SectionLabel("Sort", Modifier.padding(end = 4.dp))
                     SORTS.forEach { s -> Chip(s, selected = sort == s, ascending = ascending, onClick = { scope.launch { app.prefs.setPlaylistSort(playlistId, s) } }) }
                 }
@@ -260,6 +284,7 @@ fun PlaylistScreen(
                     onSwipeRight = { addTarget = AddTarget(track.uri, track.name) },
                     onPlus = { addTarget = AddTarget(track.uri, track.name) },
                     onPlusLong = { newPlaylistFor = AddTarget(track.uri, track.name) },
+                    showInPlaylist = false,
                 )
             }
         }

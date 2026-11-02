@@ -28,11 +28,24 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material.icons.outlined.PlaylistAddCheck
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kirkisham.motif.MotifApp
+import com.kirkisham.motif.data.Info
+import com.kirkisham.motif.data.PlayCount
+import com.kirkisham.motif.data.SpTrack
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -229,11 +242,9 @@ fun TrackRow(
         Cover(track.smallCoverUrl, 40.dp, radius = 3.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(track.name, style = MaterialTheme.typography.labelLarge, color = if (playing) motif.accent else motif.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                if (track.duration_ms > 0) "${track.artistNames} · ${formatClock(track.duration_ms)}" else track.artistNames,
-                style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
+            SongSubtitle(track, if (track.duration_ms > 0) "${track.artistNames} · ${formatClock(track.duration_ms)}" else track.artistNames)
         }
+        InPlaylistGlyph(track)
         if (onPlus != null) IconButton44(Icons.Outlined.Add, "Add to playlist", onPlus, tint = plusTint, size = 18.dp, onLongClick = onPlusLong)
     }
 }
@@ -284,6 +295,10 @@ fun SongRow(
     onPlus: () -> Unit,
     onLongClick: (() -> Unit)? = null,
     onPlusLong: (() -> Unit)? = null,
+    /** 0.11: a small gold dot before the title (Album: the most played song, "start here"). */
+    marker: Boolean = false,
+    /** 0.11: the "in a playlist" glyph; the Playlist screen turns it off (the song is right there). */
+    showInPlaylist: Boolean = true,
 ) {
     val density = LocalDensity.current
     val threshold = with(density) { 72.dp.toPx() }
@@ -309,15 +324,95 @@ fun SongRow(
         ) {
             Cover(track.smallCoverUrl, 40.dp, radius = 3.dp)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(track.name, style = MaterialTheme.typography.labelLarge, color = if (playing) motif.accent else motif.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    "${track.artistNames} · ${formatClock(track.duration_ms)}",
-                    style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (marker) Box(Modifier.padding(end = 7.dp).size(6.dp).clip(CircleShape).background(motif.accent))
+                    Text(track.name, style = MaterialTheme.typography.labelLarge, color = if (playing) motif.accent else motif.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                SongSubtitle(track, "${track.artistNames} · ${formatClock(track.duration_ms)}")
             }
+            if (showInPlaylist) InPlaylistGlyph(track)
             IconButton44(Icons.Outlined.Add, "Add to playlist", onPlus, tint = motif.textMuted, size = 18.dp, onLongClick = onPlusLong)
         }
         Hairline()
+    }
+}
+
+/** What song rows need beyond their own data (0.11): play counts, the playlist index, and a way to open a playlist. */
+class RowServices(val app: MotifApp, val openPlaylist: (String) -> Unit)
+
+/** Provided once by the nav host; null in previews or the alarm picker, where rows show no extras. */
+val LocalRowServices = staticCompositionLocalOf<RowServices?> { null }
+
+/**
+ * The muted line under a song title: "Artist · 3:42", then " · 1.2M" Last.fm plays once known
+ * (0.11, item 3). The count is fetched lazily for rows on screen (after a short pause so fast
+ * scrolling does not fire for rows passing by), four at a time; nothing shows while loading or
+ * when Last.fm has no match. Long press on the count opens the full numbers.
+ */
+@Composable
+fun SongSubtitle(track: SpTrack, text: String) {
+    val info = LocalRowServices.current?.app?.info
+    val counts = info?.playCounts?.collectAsStateWithLifecycle()?.value
+    val pc = counts?.get(track.uri)
+    var sheet by remember { mutableStateOf(false) }
+    if (info != null) LaunchedEffect(track.uri) {
+        if (pc == null && track.uri.isNotBlank()) { delay(150); info.playCount(track) }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(text, style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        if (pc != null && pc.known) Text(
+            " · " + Info.abbrev(pc.plays),
+            style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1,
+            modifier = Modifier.combinedClickableCompat(true, {}, { sheet = true }),
+        )
+    }
+    if (sheet && pc != null && info != null) PlayCountSheet(info, track, pc) { sheet = false }
+}
+
+/** Full play count, listeners and Spotify popularity for one song (0.11, item 3). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PlayCountSheet(info: Info, track: SpTrack, pc: PlayCount, onDismiss: () -> Unit) {
+    var popularity by remember { mutableStateOf<Int?>(null) }
+    var popularityDone by remember { mutableStateOf(false) }
+    LaunchedEffect(track.uri) { popularity = info.popularity(track); popularityDone = true }
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = motif.card, contentColor = motif.text, dragHandle = null, shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(track.name, style = MaterialTheme.typography.titleMedium, color = motif.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(track.artistNames, style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(8.dp))
+            Text("%,d plays · %,d listeners".format(pc.plays, pc.listeners), style = MaterialTheme.typography.bodyLarge, color = motif.text)
+            Text(
+                when { popularity != null -> "Popularity $popularity / 100"; popularityDone -> "Popularity unknown"; else -> "Popularity …" },
+                style = MaterialTheme.typography.bodyLarge, color = motif.text,
+            )
+            Text("Last.fm plays · Spotify popularity", style = MaterialTheme.typography.bodySmall, color = motif.textDim)
+        }
+    }
+}
+
+/**
+ * "In a playlist" glyph (0.11, item 4): a thin list-check in the accent to the left of the plus when the
+ * song is in at least one of the user's playlists; nothing otherwise. Tap lists the playlists; tapping
+ * a name opens it.
+ */
+@Composable
+fun InPlaylistGlyph(track: SpTrack) {
+    val services = LocalRowServices.current ?: return
+    val index = services.app.playlistIndex.state.collectAsStateWithLifecycle().value
+    val ids = index[track.uri] ?: return
+    if (ids.isEmpty()) return
+    var sheet by remember { mutableStateOf(false) }
+    IconButton44(Icons.Outlined.PlaylistAddCheck, "In a playlist", { sheet = true }, tint = motif.accent, size = 18.dp)
+    if (sheet) {
+        val playlists = services.app.library.playlists.collectAsStateWithLifecycle().value.orEmpty()
+        val rows = ids.mapNotNull { id -> playlists.firstOrNull { it.id == id } }.sortedBy { it.name.lowercase() }
+        MenuSheet(
+            title = "In " + if (rows.size == 1) "1 playlist" else "${rows.size} playlists",
+            subtitle = track.name,
+            items = rows.map { p -> MenuItem(p.name) { services.openPlaylist(p.id) } },
+            onDismiss = { sheet = false },
+        )
     }
 }
 

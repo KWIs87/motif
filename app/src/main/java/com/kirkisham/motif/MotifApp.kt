@@ -11,6 +11,7 @@ import com.kirkisham.motif.data.Info
 import com.kirkisham.motif.data.Library
 import com.kirkisham.motif.data.Lyrics
 import com.kirkisham.motif.data.PlaybackController
+import com.kirkisham.motif.data.PlaylistIndex
 import com.kirkisham.motif.data.Prefs
 import com.kirkisham.motif.data.SpotifyRemote
 import com.kirkisham.motif.data.UndoManager
@@ -19,7 +20,9 @@ import com.kirkisham.motif.widget.MotifWidget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -33,6 +36,8 @@ class MotifApp : Application() {
     lateinit var api: SpotifyApi
         private set
     lateinit var library: Library
+        private set
+    lateinit var playlistIndex: PlaylistIndex
         private set
     lateinit var prefs: Prefs
         private set
@@ -62,17 +67,24 @@ class MotifApp : Application() {
         tokenStore = TokenStore(this)
         spotifyAuth = SpotifyAuth(this, tokenStore)
         api = SpotifyApi(spotifyAuth)
-        library = Library(api)
+        playlistIndex = PlaylistIndex(java.io.File(filesDir, "info"))
+        library = Library(api, playlistIndex)
         prefs = Prefs(this)
         remote = SpotifyRemote(this)
         player = PlaybackController(remote, prefs, library, api)
         lyrics = Lyrics()
-        info = Info(api)
+        info = Info(api, java.io.File(filesDir, "info"))
         updates = Updates(this, prefs)
         devices = Devices(api, this)
         undo = UndoManager(appScope)
         alarmStore = AlarmStore(this)
         alarmScheduler = AlarmScheduler(this, alarmStore)
+
+        // "In a playlist" index (0.11): load it, then re-run the background pass whenever the playlist list changes.
+        appScope.launch {
+            playlistIndex.load()
+            library.playlists.filterNotNull().collectLatest { library.warmIndex(it) }
+        }
 
         // Keep the widget in step with playback and with the style settings, whenever this process is alive.
         val scope = appScope

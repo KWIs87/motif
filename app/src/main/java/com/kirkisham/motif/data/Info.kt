@@ -3,13 +3,24 @@ package com.kirkisham.motif.data
 import android.util.Log
 import com.kirkisham.motif.BuildConfig
 import com.kirkisham.motif.auth.SpotifyApi
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -21,6 +32,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.File
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
@@ -59,6 +71,15 @@ data class ArtistFacts(
 
 data class Concert(val venue: String, val city: String, val date: String, val url: String?)
 
+/** Last.fm play count for one song (0.11). [plays] is -1 when Last.fm has no match (a cached miss). */
+data class PlayCount(val plays: Long, val listeners: Long) {
+    val known: Boolean get() = plays >= 0
+}
+
+/** Disk form of a [PlayCount]: plays, listeners, fetched-at. */
+@Serializable
+private data class PcEntry(val p: Long, val l: Long, val at: Long)
+
 /** An artist's releases grouped by Spotify's `album_group`, newest first; empty groups are hidden. */
 data class Discography(
     val albums: List<SpAlbum> = emptyList(),
@@ -88,11 +109,12 @@ data class SongInfo(
  * concerts. Every lookup is independent, runs off the main thread, fails silently (the section
  * hides) and is cached for 24 hours per track or artist so free APIs are not hammered.
  */
-class Info(private val api: SpotifyApi) {
+class Info(private val api: SpotifyApi, private val cacheDir: File) {
     private val http = OkHttpClient.Builder().callTimeout(10, TimeUnit.SECONDS).build()
     private val json = Json { ignoreUnknownKeys = true }
     private val lock = Mutex()
     private val cache = HashMap<String, Pair<Long, Any?>>()
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private suspend fun <T> cached(key: String, load: suspend () -> T): T {
         val now = System.currentTimeMillis()
@@ -169,6 +191,90 @@ class Info(private val api: SpotifyApi) {
         }
         coroutineScope { pairs.map { (a, n) -> async { matchOnSpotify(n, a) } }.mapNotNull { it.await() } }
             .distinctBy { it.uri }.take(6)
+    }
+
+    // ---- Play counts (0.11, item 3) ----
+
+    /**
+     * Last.fm play counts keyed by track URI: an in-memory LRU of [PC_MAX] entries that is also the
+     * disk cache (one JSON file under the app's files dir, written at most every 1.5 s). Hits live
+     * 30 days, misses 7. [playCounts] is the snapshot the rows read; it changes whenever a count lands.
+     */
+    private val pcLock = Mutex()
+    private var pcLoaded = false
+    private val pcFile = File(cacheDir, "playcounts.json")
+    private val pcMap = object : LinkedHashMap<String, PcEntry>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PcEntry>?): Boolean = size > PC_MAX
+    }
+    private var pcDirty = false
+    private var pcFlush: Job? = null
+    private val pcGate = Semaphore(4)
+    private val _playCounts = MutableStateFlow<Map<String, PlayCount>>(emptyMap())
+    val playCounts: StateFlow<Map<String, PlayCount>> = _playCounts.asStateFlow()
+
+    private suspend fun pcLoad() {
+        if (pcLoaded) return
+        pcLock.withLock {
+            if (pcLoaded) return
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    if (pcFile.exists()) json.decodeFromString<Map<String, PcEntry>>(pcFile.readText()).forEach { (k, v) -> pcMap[k] = v }
+                }.onFailure { Log.w(TAG, "play count cache unreadable: ${it.javaClass.simpleName}") }
+            }
+            val now = System.currentTimeMillis()
+            _playCounts.value = pcMap.filter { pcFresh(it.value, now) }.mapValues { PlayCount(it.value.p, it.value.l) }
+            pcLoaded = true
+        }
+    }
+
+    private fun pcFresh(e: PcEntry, now: Long) = now - e.at < (if (e.p >= 0) PC_TTL_MS else PC_MISS_TTL_MS)
+
+    private fun pcScheduleFlush() {
+        pcDirty = true
+        if (pcFlush?.isActive == true) return
+        pcFlush = ioScope.launch {
+            delay(1_500)
+            val text = pcLock.withLock { if (!pcDirty) return@launch; pcDirty = false; json.encodeToString(HashMap(pcMap)) }
+            runCatching { cacheDir.mkdirs(); pcFile.writeText(text) }.onFailure { Log.w(TAG, "play count cache not written: ${it.javaClass.simpleName}") }
+        }
+    }
+
+    /** The cached count, if any, without fetching (sorting by Plays reads this through [playCounts]). */
+    suspend fun cachedPlayCount(uri: String): PlayCount? {
+        pcLoad()
+        val now = System.currentTimeMillis()
+        return pcLock.withLock { pcMap[uri]?.takeIf { pcFresh(it, now) }?.let { PlayCount(it.p, it.l) } }
+    }
+
+    /**
+     * Last.fm track.getInfo (artist + track, autocorrect on) → plays and listeners, cached 30 days.
+     * At most four fetches in flight; callers that leave (a row scrolled away) simply stop waiting.
+     * Null while Last.fm cannot be asked (no key, network); a cached miss returns plays = -1.
+     */
+    suspend fun playCount(track: SpTrack): PlayCount? {
+        if (track.uri.isBlank()) return null
+        cachedPlayCount(track.uri)?.let { return it }
+        val artist = track.artists.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: return null
+        if (BuildConfig.LASTFM_API_KEY.isBlank()) return null
+        return pcGate.withPermit {
+            cachedPlayCount(track.uri)?.let { return@withPermit it }
+            val root = lastfm("track.getInfo", "artist" to artist, "track" to track.name) ?: return@withPermit null
+            val t = root.obj("track")
+            val pc = if (t == null) PlayCount(-1, 0) else PlayCount(t.str("playcount")?.toLongOrNull() ?: -1, t.str("listeners")?.toLongOrNull() ?: 0)
+            pcLock.withLock {
+                pcMap[track.uri] = PcEntry(pc.plays, pc.listeners, System.currentTimeMillis())
+                _playCounts.value = _playCounts.value + (track.uri to pc)
+            }
+            pcScheduleFlush()
+            pc
+        }
+    }
+
+    /** Spotify popularity 0–100 from one GET /tracks/{id} (the only form Dev Mode allows), cached 24 h. */
+    suspend fun popularity(track: SpTrack): Int? {
+        track.popularity?.let { return it }
+        val id = track.id ?: return null
+        return cached("popularity:$id") { api.track(id)?.popularity }
     }
 
     // ---- Per artist ----
@@ -490,7 +596,8 @@ class Info(private val api: SpotifyApi) {
             append("https://ws.audioscrobbler.com/2.0/?method=").append(method).append("&format=json&autocorrect=").append(if (autocorrect) 1 else 0).append("&api_key=").append(key)
             params.forEach { (k, v) -> append('&').append(k).append('=').append(enc(v)) }
         }
-        return getJson(url, "Last.fm")
+        // Last.fm answers "not found" with a 400 and an error body; that body is wanted so misses can be cached.
+        return getJson(url, "Last.fm", acceptClientError = true)
     }
 
     private suspend fun matchOnSpotify(title: String, artist: String): SpTrack? {
@@ -551,12 +658,12 @@ class Info(private val api: SpotifyApi) {
 
     // ---- Plumbing ----
 
-    private suspend fun getJson(url: String, tag: String, vararg headers: Pair<String, String>): JsonObject? = withContext(Dispatchers.IO) {
+    private suspend fun getJson(url: String, tag: String, vararg headers: Pair<String, String>, acceptClientError: Boolean = false): JsonObject? = withContext(Dispatchers.IO) {
         val b = Request.Builder().url(url).header("User-Agent", UA).header("Accept", "application/json")
         headers.forEach { (k, v) -> b.header(k, v) }
         try {
             http.newCall(b.build()).execute().use { resp ->
-                if (!resp.isSuccessful) { Log.w(TAG, "$tag -> ${resp.code}"); return@withContext null }
+                if (!resp.isSuccessful && !(acceptClientError && resp.code == 400)) { Log.w(TAG, "$tag -> ${resp.code}"); return@withContext null }
                 val text = resp.body?.string().orEmpty()
                 if (text.isBlank()) return@withContext null
                 json.parseToJsonElement(text) as? JsonObject
@@ -581,7 +688,21 @@ class Info(private val api: SpotifyApi) {
     companion object {
         private const val TAG = "MotifInfo"
         private const val TTL_MS = 24 * 60 * 60 * 1000L
-        private const val UA = "Motif/0.10 (personal Android client; github.com/KWIs87/motif)"
+        private const val PC_TTL_MS = 30 * 24 * 60 * 60 * 1000L
+        private const val PC_MISS_TTL_MS = 7 * 24 * 60 * 60 * 1000L
+        private const val PC_MAX = 6000
+        private const val UA = "Motif/0.11 (personal Android client; github.com/KWIs87/motif)"
+
+        /** 912 · 1.2K · 843K · 1.2M · 12M, for the muted line on song rows. */
+        fun abbrev(n: Long): String = when {
+            n < 1_000 -> n.toString()
+            n < 10_000 -> trimZero(n / 1_000.0) + "K"
+            n < 1_000_000 -> (n / 1_000).toString() + "K"
+            n < 10_000_000 -> trimZero(n / 1_000_000.0) + "M"
+            n < 1_000_000_000 -> (n / 1_000_000).toString() + "M"
+            else -> trimZero(n / 1_000_000_000.0) + "B"
+        }
+        private fun trimZero(d: Double): String = "%.1f".format(d).removeSuffix(".0")
 
         /** Last.fm tags that say nothing about the music (0.10, item 7). */
         val JUNK_TAGS = setOf(

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,6 +31,8 @@ import com.kirkisham.motif.ui.album.AlbumScreen
 import com.kirkisham.motif.ui.components.AddTarget
 import com.kirkisham.motif.ui.components.AddToHost
 import com.kirkisham.motif.ui.components.DevicesSheet
+import com.kirkisham.motif.ui.components.LocalRowServices
+import com.kirkisham.motif.ui.components.RowServices
 import com.kirkisham.motif.ui.components.MiniPlayer
 import com.kirkisham.motif.ui.components.UndoPill
 import com.kirkisham.motif.ui.components.dismissUndoOnTouch
@@ -103,7 +106,10 @@ fun MotifNavHost(
         )
     }
 
+    // Song rows everywhere read play counts and the playlist index through this (0.11).
+    val rowServices = remember(app) { RowServices(app) { id -> nav.navigate(Routes.playlist(id)) } }
     Box(Modifier.fillMaxSize().dismissUndoOnTouch(app.undo)) {
+        CompositionLocalProvider(LocalRowServices provides rowServices) {
         NavHost(nav, startDestination = Routes.HOME) {
             composable(Routes.HOME) {
                 HomeScreen(
@@ -201,6 +207,7 @@ fun MotifNavHost(
             }
             composable(Routes.SETTINGS) { SettingsScreen(app, onBack = { nav.popBackStack() }) }
             composable(Routes.ALARM) { AlarmScreen(app, onBack = { nav.popBackStack() }) }
+        }
         }
 
         // Bottom overlays: the undo pill sits above the ribbon; neither shows on Now playing.

@@ -4,6 +4,7 @@ import com.kirkisham.motif.auth.SpotifyApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -11,7 +12,7 @@ import kotlinx.coroutines.sync.withLock
  * In-memory cache of the user's library on top of the Web API. Screens read the StateFlows and
  * call refresh when they appear; edits update the cache first so the UI never waits on Spotify.
  */
-class Library(private val api: SpotifyApi) {
+class Library(private val api: SpotifyApi, val index: PlaylistIndex) {
 
     private val _playlists = MutableStateFlow<List<SpPlaylist>?>(null)
     val playlists: StateFlow<List<SpPlaylist>?> = _playlists.asStateFlow()
@@ -37,6 +38,27 @@ class Library(private val api: SpotifyApi) {
         } else {
             _status.value = null
             _playlists.value = list
+            index.retainPlaylists(list.map { it.id }.toSet())
+        }
+    }
+
+    /**
+     * Background pass for the "in a playlist" index (0.11, item 4): loads the rows of every owned or
+     * collaborative playlist whose snapshot the index has not seen, one at a time with a pause between,
+     * and fills the tracks cache for playlists not opened yet. Cheap when nothing changed. Cancelled
+     * and restarted by the caller when the playlist list changes.
+     */
+    suspend fun warmIndex(list: List<SpPlaylist>) {
+        index.load()
+        for (p in list) {
+            if (!p.hasItems) continue
+            if (index.has(p.id) && (p.snapshot_id == null || index.snapshotOf(p.id) == p.snapshot_id)) continue
+            val items = api.playlistTracks(p.id) ?: continue
+            val rows = items.filter { it.item != null }
+            index.setPlaylist(p.id, rows.mapNotNull { it.item?.uri }, p.snapshot_id)
+            val flow = tracksCache.getOrPut(p.id) { MutableStateFlow(null) }
+            if (flow.value == null) flow.value = rows
+            delay(250)
         }
     }
 
@@ -60,6 +82,7 @@ class Library(private val api: SpotifyApi) {
             return
         }
         flow.value = items.filter { it.item != null }
+        index.setPlaylist(playlistId, flow.value.orEmpty().mapNotNull { it.item?.uri }, playlistById(playlistId)?.snapshot_id)
     }
 
     /**
@@ -79,7 +102,7 @@ class Library(private val api: SpotifyApi) {
     suspend fun unfollow(id: String): Boolean {
         val uri = playlistById(id)?.uri ?: "spotify:playlist:$id"
         val ok = api.unfollowPlaylist(uri)
-        if (ok) _playlists.value = _playlists.value?.filterNot { it.id == id }
+        if (ok) { _playlists.value = _playlists.value?.filterNot { it.id == id }; index.removePlaylist(id) }
         return ok
     }
 
@@ -97,7 +120,7 @@ class Library(private val api: SpotifyApi) {
         var ok = true
         var added = 0
         for (chunk in trackUris.chunked(100)) {
-            if (api.addToPlaylist(playlistId, chunk)) added += chunk.size else ok = false
+            if (api.addToPlaylist(playlistId, chunk)) { added += chunk.size; index.add(playlistId, chunk) } else ok = false
         }
         if (added > 0) {
             _playlists.value = _playlists.value?.map {
@@ -115,6 +138,7 @@ class Library(private val api: SpotifyApi) {
         for (chunk in trackUris.chunked(100)) {
             if (api.removeFromPlaylist(playlistId, chunk)) {
                 val set = chunk.toSet()
+                index.remove(playlistId, chunk)
                 tracksCache[playlistId]?.let { f ->
                     val before = f.value?.size ?: 0
                     f.value = f.value?.filterNot { it.item?.uri in set }
@@ -176,6 +200,7 @@ class Library(private val api: SpotifyApi) {
         val set = uris.toSet()
         val after = before.filterNot { it.item?.uri in set }
         flow.value = after
+        index.remove(playlistId, uris)
         val gone = before.size - after.size
         _playlists.value = _playlists.value?.map { if (it.id == playlistId) it.withCount((it.itemCount ?: gone) - gone) else it }
         return Hidden(playlistId, before, uris)
@@ -184,6 +209,7 @@ class Library(private val api: SpotifyApi) {
     fun restoreTracks(h: Hidden) {
         val flow = tracksCache[h.playlistId] ?: return
         flow.value = h.before
+        index.setPlaylist(h.playlistId, h.before.mapNotNull { it.item?.uri }, null)
         _playlists.value = _playlists.value?.map { if (it.id == h.playlistId) it.withCount(h.before.size) else it }
     }
 
@@ -201,13 +227,18 @@ class Library(private val api: SpotifyApi) {
         val i = cur.indexOfFirst { it.id == id }
         if (i < 0) return null
         _playlists.value = cur.filterIndexed { j, _ -> j != i }
+        index.removePlaylist(id)?.let { hiddenIndex[id] = it }
         return cur[i] to i
     }
 
-    fun restorePlaylist(p: SpPlaylist, index: Int) {
+    /** URIs the index held for playlists hidden by [hidePlaylist], for [restorePlaylist]. */
+    private val hiddenIndex = mutableMapOf<String, List<String>>()
+
+    fun restorePlaylist(p: SpPlaylist, at: Int) {
         val cur = _playlists.value?.toMutableList() ?: mutableListOf()
-        if (cur.none { it.id == p.id }) cur.add(index.coerceIn(0, cur.size), p)
+        if (cur.none { it.id == p.id }) cur.add(at.coerceIn(0, cur.size), p)
         _playlists.value = cur
+        hiddenIndex.remove(p.id)?.let { index.restorePlaylist(p.id, it) }
     }
 
     /** The Spotify side of [hidePlaylist]; reloads the list when Spotify refused. */
@@ -220,6 +251,7 @@ class Library(private val api: SpotifyApi) {
     suspend fun removeTrack(playlistId: String, trackUri: String): Boolean {
         val ok = api.removeFromPlaylist(playlistId, listOf(trackUri))
         if (ok) {
+            index.remove(playlistId, listOf(trackUri))
             tracksCache[playlistId]?.let { f -> f.value = f.value?.filterNot { it.item?.uri == trackUri } }
             _playlists.value = _playlists.value?.map {
                 if (it.id == playlistId) it.withCount((it.itemCount ?: 1) - 1) else it

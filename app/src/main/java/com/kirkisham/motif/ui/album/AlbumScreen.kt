@@ -42,9 +42,11 @@ import com.kirkisham.motif.data.SpArtist
 import com.kirkisham.motif.data.SpTrack
 import com.kirkisham.motif.ui.components.AddTarget
 import com.kirkisham.motif.ui.components.AddToHost
+import com.kirkisham.motif.ui.components.Chip
 import com.kirkisham.motif.ui.components.Cover
 import com.kirkisham.motif.ui.components.IconButton44
 import com.kirkisham.motif.ui.components.PlainLine
+import com.kirkisham.motif.ui.components.SectionLabel
 import com.kirkisham.motif.ui.components.SongMenuSheet
 import com.kirkisham.motif.ui.components.SongRow
 import com.kirkisham.motif.ui.components.TopBar
@@ -53,6 +55,9 @@ import com.kirkisham.motif.ui.components.pluralSongs
 import com.kirkisham.motif.ui.motif
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 /**
  * Album (0.9, asked for by the owner; not on the wireframe canvas): the Playlist screen's look without
@@ -68,6 +73,8 @@ fun AlbumScreen(
     onOpenArtist: (SpArtist) -> Unit,
 ) {
     val playback by app.remote.playback.collectAsStateWithLifecycle()
+    val playCounts by app.info.playCounts.collectAsStateWithLifecycle()
+    var byPlays by remember { mutableStateOf(false) }
     var album by remember { mutableStateOf<SpAlbum?>(null) }
     var tracks by remember { mutableStateOf<List<SpTrack>?>(null) }
     var failed by remember { mutableStateOf(false) }
@@ -88,8 +95,25 @@ fun AlbumScreen(
 
     // Simplified album tracks carry no album, so the album is attached: rows get the cover and
     // the song menu and add sheet work the same as elsewhere.
-    val rows = remember(tracks, album) { tracks.orEmpty().filter { it.name.isNotBlank() }.map { it.copy(album = album) } }
-    val totalMs = rows.sumOf { it.duration_ms }
+    val albumRows = remember(tracks, album) { tracks.orEmpty().filter { it.name.isNotBlank() }.map { it.copy(album = album) } }
+    val totalMs = albumRows.sumOf { it.duration_ms }
+    // Plays (0.11): most played first, songs without a count at the bottom in album order.
+    val rows = remember(albumRows, byPlays, playCounts) {
+        if (!byPlays) albumRows else {
+            val (known, unknown) = albumRows.partition { (playCounts[it.uri]?.plays ?: -1L) >= 0 }
+            known.sortedByDescending { playCounts[it.uri]?.plays ?: -1L } + unknown
+        }
+    }
+    // "Start here": the most played song gets a gold dot once at least half the songs have a count.
+    val topUri = remember(albumRows, playCounts) {
+        val known = albumRows.mapNotNull { t -> playCounts[t.uri]?.takeIf { it.plays >= 0 }?.let { t.uri to it.plays } }
+        if (albumRows.isNotEmpty() && known.size * 2 >= albumRows.size) known.maxByOrNull { it.second }?.first else null
+    }
+    // Albums are short, so every song's count is asked for once the list is in hand (two at a time).
+    LaunchedEffect(albumRows) {
+        val missing = albumRows.filter { it.uri.isNotBlank() && app.info.playCounts.value[it.uri] == null }
+        coroutineScope { val gate = Semaphore(2); missing.forEach { t -> launch { gate.withPermit { app.info.playCount(t) } } } }
+    }
     val a = album
     val subtitle = listOfNotNull(
         a?.year,
@@ -127,18 +151,25 @@ fun AlbumScreen(
                         contentAlignment = Alignment.Center,
                     ) { Icon(Icons.Filled.PlayArrow, "Play", tint = motif.ground, modifier = Modifier.size(22.dp)) }
                 }
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(16.dp))
+                Row(Modifier.padding(start = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SectionLabel("Sort", Modifier.padding(end = 4.dp))
+                    Chip("Album order", !byPlays, { byPlays = false })
+                    Chip("Plays", byPlays, { byPlays = true })
+                }
                 line?.let { PlainLine(it, Modifier.padding(start = 8.dp)) }
                 if (failed) PlainLine("Spotify did not answer.", Modifier.padding(start = 8.dp))
                 else if (tracks == null) PlainLine("Loading songs", Modifier.padding(start = 8.dp))
                 else if (rows.isEmpty()) PlainLine("Spotify returned no songs for this album.", Modifier.padding(start = 8.dp))
             }
-            itemsIndexed(rows, key = { i, t -> "$i-${t.uri}" }) { index, track ->
+            itemsIndexed(rows, key = { i, t -> "$i-${t.uri}" }) { _, track ->
+                val albumIndex = albumRows.indexOf(track).coerceAtLeast(0)
                 SongRow(
                     track = track,
                     playing = playback?.uri == track.uri,
                     modifier = Modifier.padding(start = 8.dp),
-                    onClick = { a?.uri?.let { app.player.playInContext(it, index, null, track.uri) } },
+                    marker = track.uri == topUri,
+                    onClick = { a?.uri?.let { app.player.playInContext(it, albumIndex, null, track.uri) } },
                     onSwipeRight = { addTarget = AddTarget(track.uri, track.name) },
                     onPlus = { addTarget = AddTarget(track.uri, track.name) },
                     onPlusLong = { newPlaylistFor = AddTarget(track.uri, track.name) },
