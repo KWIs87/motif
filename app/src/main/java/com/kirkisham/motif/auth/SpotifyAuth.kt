@@ -5,7 +5,10 @@ import android.net.Uri
 import android.util.Base64
 import androidx.browser.customtabs.CustomTabsIntent
 import com.kirkisham.motif.BuildConfig
+import com.kirkisham.motif.data.ApiLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -81,29 +84,68 @@ class SpotifyAuth(private val context: Context, private val store: TokenStore) {
         return exchange(body).also { if (it) store.pendingVerifier = null }
     }
 
-    /** Returns a usable access token, refreshing if it is within a minute of expiry. Null when logged out. */
-    suspend fun accessToken(): String? {
-        val refresh = store.refreshToken ?: return null
-        if (System.currentTimeMillis() < store.expiresAt - 60_000) return store.accessToken
-        val body = FormBody.Builder()
-            .add("grant_type", "refresh_token")
-            .add("refresh_token", refresh)
-            .add("client_id", BuildConfig.SPOTIFY_CLIENT_ID)
-            .build()
-        return if (exchange(body)) store.accessToken else null
+    /**
+     * Returns a usable access token, refreshing if it is within a minute of expiry; [force] refreshes
+     * regardless (after a 401). Null when logged out or the refresh failed. One refresh at a time
+     * (0.12.1): Spotify rotates the refresh token, so two parallel refreshes with the same old token
+     * made the loser fail; now the second caller waits and reuses the first one's result. Never throws.
+     */
+    suspend fun accessToken(force: Boolean = false, staleSince: Long = 0L): String? {
+        store.refreshToken ?: return null
+        if (!force && System.currentTimeMillis() < store.expiresAt - 60_000) return store.accessToken
+        return refreshLock.withLock {
+            // Someone else may have refreshed while we waited: reuse it unless it predates the 401 we saw.
+            val refresh = store.refreshToken ?: return@withLock null
+            val fresh = System.currentTimeMillis() < store.expiresAt - 60_000
+            if (fresh && (!force || lastRefreshAt > staleSince)) return@withLock store.accessToken
+            lastRefreshAt = System.currentTimeMillis()
+            val body = FormBody.Builder()
+                .add("grant_type", "refresh_token")
+                .add("refresh_token", refresh)
+                .add("client_id", BuildConfig.SPOTIFY_CLIENT_ID)
+                .build()
+            val ok = exchange(body)
+            ApiLog.auth { it.copy(signedIn = store.refreshToken != null, expiresAt = store.expiresAt, lastRefreshAt = System.currentTimeMillis(), lastRefreshOk = ok, lastRefreshError = if (ok) "" else lastError) }
+            if (ok) store.accessToken else null
+        }
     }
 
-    fun logout() = store.clear()
+    private val refreshLock = Mutex()
+    /** When the last refresh started (this process), so a 401 retry does not refresh a token refreshed since. */
+    @Volatile private var lastRefreshAt = 0L
+    private var lastError = ""
 
+    /** Signed-in flag and token expiry for the Diagnostics screen; no token material. */
+    fun snapshot(): ApiLog.Auth = ApiLog.auth.value.copy(signedIn = store.refreshToken != null, expiresAt = store.expiresAt)
+
+    fun logout() {
+        store.clear()
+        ApiLog.auth { ApiLog.Auth() }
+    }
+
+    /** Token endpoint call. Returns false on any failure (HTTP, network, parse) and records why; never throws. */
     private suspend fun exchange(body: FormBody): Boolean = withContext(Dispatchers.IO) {
         val req = Request.Builder().url("https://accounts.spotify.com/api/token").post(body).build()
-        http.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return@withContext false
-            val t = json.decodeFromString<TokenResponse>(resp.body!!.string())
-            store.accessToken = t.access_token
-            t.refresh_token?.let { store.refreshToken = it }
-            store.expiresAt = System.currentTimeMillis() + t.expires_in * 1000L
-            true
+        val t0 = System.currentTimeMillis()
+        try {
+            http.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    lastError = "HTTP ${resp.code}"
+                    ApiLog.call("POST", "accounts/api/token", resp.code, System.currentTimeMillis() - t0, lastError)
+                    return@withContext false
+                }
+                val t = json.decodeFromString<TokenResponse>(resp.body!!.string())
+                store.accessToken = t.access_token
+                t.refresh_token?.let { store.refreshToken = it }
+                store.expiresAt = System.currentTimeMillis() + t.expires_in * 1000L
+                lastError = ""
+                ApiLog.call("POST", "accounts/api/token", resp.code, System.currentTimeMillis() - t0)
+                true
+            }
+        } catch (e: Exception) {
+            lastError = e.javaClass.simpleName
+            ApiLog.call("POST", "accounts/api/token", 0, System.currentTimeMillis() - t0, lastError)
+            false
         }
     }
 

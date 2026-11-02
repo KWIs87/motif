@@ -28,13 +28,34 @@ class Library(private val api: SpotifyApi, val index: PlaylistIndex) {
     private val lock = Mutex()
     private var userId: String? = null
 
+    private val _trackErrors = MutableStateFlow<Map<String, SpotifyApi.ApiError>>(emptyMap())
+    /**
+     * Why a playlist's rows could not be loaded, per playlist id (0.12.1). Before this a failed
+     * /playlists/{id}/items left the cache null and the screen on "Loading songs" for good; now the
+     * screen can say what happened and retry. Cleared by the next successful load.
+     */
+    val trackErrors: StateFlow<Map<String, SpotifyApi.ApiError>> = _trackErrors.asStateFlow()
+
+    /** One plain line for a failure, shared by Home and the Playlist screen. */
+    fun describe(e: SpotifyApi.ApiError?, what: String, nowMs: Long = System.currentTimeMillis()): String = when (e) {
+        is SpotifyApi.ApiError.RateLimited -> {
+            val s = ((e.untilMs - nowMs + 999) / 1000).coerceAtLeast(0)
+            if (s > 0) "Spotify is rate-limiting; retrying in ${if (s >= 90) "${(s + 59) / 60} min" else "$s s"}" else "Spotify is rate-limiting; retrying"
+        }
+        SpotifyApi.ApiError.SignInAgain -> "Sign in again (Settings) to load $what."
+        SpotifyApi.ApiError.SignedOut -> "Sign in to load $what."
+        is SpotifyApi.ApiError.Http -> "Spotify answered ${e.code} loading $what. Tap to retry."
+        is SpotifyApi.ApiError.Network -> "Could not reach Spotify to load $what. Tap to retry."
+        null -> "Could not load $what. Tap to retry."
+    }
+
     suspend fun me(): SpotifyApi.Me? = api.me()?.also { userId = it.id }
     suspend fun userId(): String? = userId ?: me()?.id
 
     suspend fun refreshPlaylists() {
         val list = api.allPlaylists()
         if (list == null) {
-            if (_playlists.value == null) _status.value = "Could not load playlists. Check the connection."
+            if (_playlists.value == null) _status.value = describe(api.lastError.value, "playlists").removeSuffix(" Tap to retry.")
         } else {
             _status.value = null
             _playlists.value = list
@@ -53,7 +74,13 @@ class Library(private val api: SpotifyApi, val index: PlaylistIndex) {
         for (p in list) {
             if (!p.hasItems) continue
             if (index.has(p.id) && (p.snapshot_id == null || index.snapshotOf(p.id) == p.snapshot_id)) continue
-            val items = api.playlistTracks(p.id) ?: continue
+            // Background mode (0.12.1): waits while a user load is running or Spotify is rate-limiting,
+            // one call at a time, 600 ms apart; any 429 parks the whole pass for 60 s (see SpotifyApi).
+            val items = api.playlistTracks(p.id, background = true)
+            if (items == null) {
+                if (api.lastError.value is SpotifyApi.ApiError.RateLimited) delay(60_000)
+                continue
+            }
             val rows = items.filter { it.item != null }
             index.setPlaylist(p.id, rows.mapNotNull { it.item?.uri }, p.snapshot_id)
             val flow = tracksCache.getOrPut(p.id) { MutableStateFlow(null) }
@@ -79,8 +106,10 @@ class Library(private val api: SpotifyApi, val index: PlaylistIndex) {
         val items = api.playlistTracks(playlistId)
         if (items == null) {
             if (contentsShared(playlistId) == false && flow.value == null) flow.value = emptyList()
+            else _trackErrors.value = _trackErrors.value + (playlistId to (api.lastError.value ?: SpotifyApi.ApiError.Network("unknown")))
             return
         }
+        _trackErrors.value = _trackErrors.value - playlistId
         flow.value = items.filter { it.item != null }
         index.setPlaylist(playlistId, flow.value.orEmpty().mapNotNull { it.item?.uri }, playlistById(playlistId)?.snapshot_id)
     }

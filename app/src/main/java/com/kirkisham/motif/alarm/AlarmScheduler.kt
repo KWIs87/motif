@@ -27,21 +27,39 @@ class AlarmScheduler(private val context: Context, private val store: AlarmStore
     fun canScheduleExact(): Boolean =
         Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()
 
-    /** Re-reads every alarm and (re)schedules the enabled ones. Call after any edit and on boot. */
-    suspend fun rescheduleAll() {
+    /**
+     * Re-reads every alarm and (re)schedules the enabled ones. Runs on boot, time changes, after the
+     * app is updated and at every process start (0.12.1): setAlarmClock with the same PendingIntent is
+     * idempotent, so this only ever restores an alarm the system dropped (force stop, Samsung's app
+     * sleep, an update) and never doubles one. One summary line in the log plus any roll-forward.
+     */
+    suspend fun rescheduleAll(reason: String = "") {
         val alarms = store.all()
-        for (a in alarms) schedule(a)
+        var set = 0
+        for (a in alarms) if (schedule(a, quiet = true)) set++
+        AlarmLog.log(context, "rescheduled", "$set of ${alarms.size} alarms set" + if (reason.isNotBlank()) " ($reason)" else "")
     }
 
-    fun schedule(a: Alarm) {
+    /** Sets or cancels one alarm from [a]'s own next trigger. Returns true when a time was set. */
+    fun schedule(a: Alarm, quiet: Boolean = false): Boolean {
         val pi = pending(a.id, snooze = false)
-        val next = a.nextTrigger()
+        val now = ZonedDateTime.now()
+        val next = a.nextTrigger(now)
         if (next == null) {
             am.cancel(pi)
-            AlarmLog.log(context, "cancelled", "${AlarmLog.idOf(a.id)} (off or no next time)")
-            return
+            if (!quiet) AlarmLog.log(context, "cancelled", "${AlarmLog.idOf(a.id)} (off or no next time)")
+            return false
         }
-        setClock(next.toInstant().toEpochMilli(), pi, a.id, "scheduled")
+        // A one-time alarm whose stored date is already behind us was missed (the system dropped the
+        // alarm, or the phone was off): say so, since rolling it forward otherwise looks like a date bug.
+        if (a.oneTime && a.enabled) {
+            val stored = a.date?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() }
+            if (stored != null && stored != next.toLocalDate()) {
+                AlarmLog.log(context, "missed", "${AlarmLog.idOf(a.id)} was for $stored ${Alarm.formatTime(a.hour, a.minute)}; rolled to ${next.toLocalDate()}")
+            }
+        }
+        setClock(next.toInstant().toEpochMilli(), pi, a.id, "scheduled", quiet)
+        return true
     }
 
     /**
@@ -65,7 +83,7 @@ class AlarmScheduler(private val context: Context, private val store: AlarmStore
         setClock(at, pending(id, snooze = true), id, "snoozed $minutes min")
     }
 
-    private fun setClock(atMillis: Long, pi: PendingIntent, id: String, event: String) {
+    private fun setClock(atMillis: Long, pi: PendingIntent, id: String, event: String, quiet: Boolean = false) {
         val show = PendingIntent.getActivity(
             context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
@@ -73,7 +91,7 @@ class AlarmScheduler(private val context: Context, private val store: AlarmStore
         try {
             if (!canScheduleExact()) throw SecurityException("exact alarms not allowed")
             am.setAlarmClock(AlarmManager.AlarmClockInfo(atMillis, show), pi)
-            AlarmLog.log(context, event, "${AlarmLog.idOf(id)} for $whenText (exact)")
+            if (!quiet) AlarmLog.log(context, event, "${AlarmLog.idOf(id)} for $whenText (exact)")
         } catch (e: SecurityException) {
             // Exact alarms denied: fall back to an inexact alarm so something still fires.
             Log.w(TAG, "Exact alarm not allowed; using inexact")
@@ -129,13 +147,13 @@ class AlarmReceiver : BroadcastReceiver() {
                     releaseCpu()
                 }
             }
-            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED,
+            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED, Intent.ACTION_MY_PACKAGE_REPLACED,
             "android.intent.action.QUICKBOOT_POWERON", AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED -> {
                 val result = goAsync()
-                AlarmLog.log(context, "reschedule", intent.action?.substringAfterLast('.') ?: "")
+                val reason = intent.action?.substringAfterLast('.') ?: ""
                 val store = AlarmStore(context)
                 CoroutineScope(Dispatchers.Default).launch {
-                    try { AlarmScheduler(context, store).rescheduleAll() } catch (t: Throwable) { AlarmLog.error(context, "rescheduleAll", t) } finally { result.finish() }
+                    try { AlarmScheduler(context, store).rescheduleAll(reason) } catch (t: Throwable) { AlarmLog.error(context, "rescheduleAll", t) } finally { result.finish() }
                 }
             }
         }

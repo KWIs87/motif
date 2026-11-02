@@ -50,7 +50,7 @@ import kotlinx.coroutines.launch
 
 /** Settings (board Settings), Build 1 subset: Appearance, then Updates. The widget's own options live on its setup screen (0.12). */
 @Composable
-fun SettingsScreen(app: MotifApp, onBack: () -> Unit) {
+fun SettingsScreen(app: MotifApp, onBack: () -> Unit, onDiagnostics: () -> Unit = {}) {
     val appearance by app.prefs.appearance.collectAsStateWithLifecycle(Appearance())
     val update by app.updates.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -127,6 +127,21 @@ fun SettingsScreen(app: MotifApp, onBack: () -> Unit) {
                 }
             }
             u.line?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = motif.textMuted, modifier = Modifier.padding(top = 6.dp)) }
+        }
+
+        // Diagnostics (0.12.1): auth state and the last 50 API calls, for when something will not load.
+        Column(Modifier.padding(start = 8.dp)) {
+            Hairline()
+            Row(
+                Modifier.fillMaxWidth().height(52.dp).clickable(onClick = onDiagnostics),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Diagnostics", style = MaterialTheme.typography.bodyLarge, color = motif.text)
+                    Text("Sign-in state and the last 50 Spotify calls", style = MaterialTheme.typography.bodySmall, color = motif.textMuted)
+                }
+            }
         }
         Spacer(Modifier.height(8.dp))
     }

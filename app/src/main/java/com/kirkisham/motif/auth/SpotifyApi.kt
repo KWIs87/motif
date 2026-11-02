@@ -1,6 +1,7 @@
 package com.kirkisham.motif.auth
 
 import android.util.Log
+import com.kirkisham.motif.data.ApiLog
 import com.kirkisham.motif.data.SpAlbum
 import com.kirkisham.motif.data.SpArtist
 import com.kirkisham.motif.data.SpCurrentlyPlaying
@@ -15,6 +16,11 @@ import com.kirkisham.motif.data.SpSearchResult
 import com.kirkisham.motif.data.SpSnapshot
 import com.kirkisham.motif.data.SpTrack
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
@@ -24,6 +30,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -34,6 +42,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLEncoder
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Thin Spotify Web API client. Every call returns null (or false) on failure instead of throwing;
@@ -69,12 +78,12 @@ class SpotifyApi(private val auth: SpotifyAuth) {
      * All rows of a playlist. Episodes inside playlists come back with type "episode" and are kept.
      * Spotify only serves this for playlists the user owns or collaborates on; others fail (null).
      */
-    suspend fun playlistTracks(id: String): List<SpPlaylistItem>? {
+    suspend fun playlistTracks(id: String, background: Boolean = false): List<SpPlaylistItem>? {
         val fields = URLEncoder.encode(
             "items(added_at,item(id,name,uri,type,is_local,duration_ms,artists(name,uri,id),album(id,name,uri,images,release_date))),next,total,offset",
             "UTF-8",
         )
-        return pageAll("$BASE/playlists/$id/items?limit=100&additional_types=track,episode&fields=$fields")
+        return pageAllLenient("$BASE/playlists/$id/items?limit=100&additional_types=track,episode&fields=$fields", background)
     }
 
     suspend fun savedShows(): List<SpSavedShow>? = pageAll("$BASE/me/shows?limit=50")
@@ -233,6 +242,35 @@ class SpotifyApi(private val auth: SpotifyAuth) {
 
     // ---- Plumbing ----
 
+    /** Why the last call failed, for one plain line in the UI. */
+    sealed interface ApiError {
+        /** Spotify answered 429; [untilMs] is when its Retry-After runs out. */
+        data class RateLimited(val untilMs: Long) : ApiError
+        /** Two 401s in a row: the refresh did not help; the user must sign in again. */
+        object SignInAgain : ApiError
+        object SignedOut : ApiError
+        data class Http(val code: Int) : ApiError
+        data class Network(val kind: String) : ApiError
+    }
+
+    private val _lastError = MutableStateFlow<ApiError?>(null)
+    /** The most recent failure (cleared by the next success); screens read it to word their one line. */
+    val lastError: StateFlow<ApiError?> = _lastError.asStateFlow()
+    private val _rateLimitedUntil = MutableStateFlow(0L)
+    /** Epoch ms until which Spotify asked us to wait (0 when not rate-limited). */
+    val rateLimitedUntil: StateFlow<Long> = _rateLimitedUntil.asStateFlow()
+
+    /** User-initiated calls in flight; background work waits while this is above zero. */
+    private val userInFlight = AtomicInteger(0)
+    /** Background calls (index warm pass) run one at a time, at least [BACKGROUND_GAP_MS] apart. */
+    private val backgroundGate = Mutex()
+    private var lastBackgroundAt = 0L
+    /** After any 429 the background pass stays off until this time (60 s), whatever Retry-After said. */
+    @Volatile private var backgroundPausedUntil = 0L
+
+    /** True while a background call should hold off: a user load is running or Spotify is rate-limiting. */
+    fun backgroundBlocked(): Boolean = userInFlight.get() > 0 || System.currentTimeMillis() < maxOf(backgroundPausedUntil, _rateLimitedUntil.value)
+
     /** Follows `next` until the list ends or [max] items are in hand. */
     private suspend inline fun <reified T> pageAll(firstUrl: String, max: Int = Int.MAX_VALUE): List<T>? {
         val out = ArrayList<T>()
@@ -246,42 +284,132 @@ class SpotifyApi(private val auth: SpotifyAuth) {
         return if (out.size > max) out.take(max) else out
     }
 
-    private suspend inline fun <reified T> get(url: String): T? = withContext(Dispatchers.IO) {
-        val token = auth.accessToken() ?: return@withContext null
-        val req = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
-        try {
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    Log.w(TAG, "GET ${url.substringBefore('?').removePrefix(BASE)} -> ${resp.code}")
-                    return@withContext null
-                }
-                val text = resp.body?.string().orEmpty()
-                if (text.isBlank()) return@withContext null
-                json.decodeFromString<T>(text)
+    /**
+     * Like [pageAll] but decodes each row on its own, so one row Spotify shapes unexpectedly (a new
+     * field type, a null where none was expected) is skipped and counted instead of emptying the whole
+     * page (0.12.1). The skip count goes to the API log.
+     */
+    private suspend inline fun <reified T> pageAllLenient(firstUrl: String, background: Boolean): List<T>? {
+        val out = ArrayList<T>()
+        var url: String? = firstUrl
+        var guard = 0
+        var skipped = 0
+        while (url != null && guard++ < 100) {
+            val page = get<SpPage<JsonElement>>(url, background) ?: return if (out.isEmpty()) null else out
+            for (el in page.items) {
+                runCatching { json.decodeFromJsonElement<T>(el) }.onSuccess { out += it }.onFailure { skipped++ }
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "GET failed: ${e.javaClass.simpleName}")
+            url = page.next
+        }
+        if (skipped > 0) ApiLog.call("DECODE", firstUrl.substringBefore('?').removePrefix(BASE), 0, 0, "$skipped rows skipped")
+        return out
+    }
+
+    private suspend inline fun <reified T> get(url: String, background: Boolean = false): T? {
+        val text = execute("GET", url, null, background) ?: return null
+        if (text.isBlank()) return null
+        return try { json.decodeFromString<T>(text) } catch (e: Exception) {
+            ApiLog.call("DECODE", url.substringBefore('?').removePrefix(BASE), 0, 0, e.javaClass.simpleName)
             null
         }
     }
 
-    private suspend inline fun <reified T> send(method: String, url: String, body: JsonObject?): T? = withContext(Dispatchers.IO) {
-        val token = auth.accessToken() ?: return@withContext null
-        val rb = (body?.let { json.encodeToString(it) } ?: "").toRequestBody(jsonType)
-        val req = Request.Builder().url(url).header("Authorization", "Bearer $token").method(method, rb).build()
+    private suspend inline fun <reified T> send(method: String, url: String, body: JsonObject?): T? {
+        val text = execute(method, url, body, false) ?: return null
+        if (text.isBlank()) return null
+        return try { json.decodeFromString<T>(text) } catch (e: Exception) {
+            ApiLog.call("DECODE", url.substringBefore('?').removePrefix(BASE), 0, 0, e.javaClass.simpleName)
+            null
+        }
+    }
+
+    private suspend fun sendOk(method: String, url: String, body: JsonObject?): Boolean = execute(method, url, body, false) != null
+
+    /**
+     * One HTTP call with the 0.12.1 rules. Returns the body text on 2xx, null on any failure (the reason
+     * lands in [lastError] and the API log). 401: refresh the token once and retry; a second 401 is
+     * [ApiError.SignInAgain]. 429: remember Retry-After; a user call waits for it once when it is short
+     * ([RETRY_WAIT_MAX_MS]) and retries, otherwise gives up with [ApiError.RateLimited] so the screen can
+     * say so and retry when the time is up. Background calls never wait inside; they are gated before.
+     * Any exception (network, token refresh) is caught here, never thrown to a screen.
+     */
+    private suspend fun execute(method: String, url: String, body: JsonObject?, background: Boolean): String? = withContext(Dispatchers.IO) {
+        val path = url.substringBefore('?').removePrefix(BASE)
+        if (background) {
+            while (backgroundBlocked()) delay(250)
+            backgroundGate.lock()
+        } else userInFlight.incrementAndGet()
         try {
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    Log.w(TAG, "$method ${url.removePrefix(BASE)} -> ${resp.code}")
+            if (background) {
+                val gap = BACKGROUND_GAP_MS - (System.currentTimeMillis() - lastBackgroundAt)
+                if (gap > 0) delay(gap)
+            }
+            var refreshed = false
+            var waited = false
+            var t0 = System.currentTimeMillis()
+            var token = try { auth.accessToken() } catch (e: Exception) { null }
+            while (true) {
+                if (token == null) {
+                    val signedIn = auth.snapshot().signedIn
+                    _lastError.value = if (signedIn) ApiError.SignInAgain else ApiError.SignedOut
+                    ApiLog.call(method, path, 0, 0, if (signedIn) "no token after refresh" else "signed out")
                     return@withContext null
                 }
-                val text = resp.body?.string().orEmpty()
-                if (text.isBlank()) return@withContext null
-                json.decodeFromString<T>(text)
+                val rb = if (method == "GET") null else (body?.let { json.encodeToString(it) } ?: "").toRequestBody(jsonType)
+                val req = Request.Builder().url(url).header("Authorization", "Bearer $token").method(method, rb).build()
+                t0 = System.currentTimeMillis()
+                val result: Pair<Int, String?> = try {
+                    http.newCall(req).execute().use { resp ->
+                        val code = resp.code
+                        when {
+                            resp.isSuccessful -> code to (resp.body?.string().orEmpty())
+                            code == 429 -> {
+                                val secs = resp.header("Retry-After")?.trim()?.toLongOrNull() ?: DEFAULT_RETRY_AFTER_S
+                                val until = System.currentTimeMillis() + secs * 1000
+                                _rateLimitedUntil.value = maxOf(_rateLimitedUntil.value, until)
+                                backgroundPausedUntil = maxOf(backgroundPausedUntil, System.currentTimeMillis() + BACKGROUND_PAUSE_MS)
+                                ApiLog.call(method, path, code, System.currentTimeMillis() - t0, "Retry-After $secs s")
+                                code to null
+                            }
+                            else -> { ApiLog.call(method, path, code, System.currentTimeMillis() - t0); code to null }
+                        }
+                    }
+                } catch (e: Exception) {
+                    ApiLog.call(method, path, 0, System.currentTimeMillis() - t0, e.javaClass.simpleName)
+                    _lastError.value = ApiError.Network(e.javaClass.simpleName)
+                    return@withContext null
+                }
+                val (code, text) = result
+                if (text != null) {
+                    ApiLog.call(method, path, code, System.currentTimeMillis() - t0)
+                    if (System.currentTimeMillis() >= _rateLimitedUntil.value) _rateLimitedUntil.value = 0
+                    // A success clears the last error, except a rate limit that is still running on another path.
+                    if (_rateLimitedUntil.value == 0L || _lastError.value !is ApiError.RateLimited) _lastError.value = null
+                    return@withContext text
+                }
+                when {
+                    code == 401 && !refreshed -> {
+                        refreshed = true
+                        token = try { auth.accessToken(force = true, staleSince = t0) } catch (e: Exception) { null }
+                        continue
+                    }
+                    code == 401 -> { _lastError.value = ApiError.SignInAgain; return@withContext null }
+                    code == 429 -> {
+                        val wait = _rateLimitedUntil.value - System.currentTimeMillis()
+                        if (!background && !waited && wait in 1..RETRY_WAIT_MAX_MS) {
+                            waited = true
+                            delay(wait + 200)
+                            continue
+                        }
+                        _lastError.value = ApiError.RateLimited(_rateLimitedUntil.value)
+                        return@withContext null
+                    }
+                    else -> { _lastError.value = ApiError.Http(code); return@withContext null }
+                }
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "$method failed: ${e.javaClass.simpleName}")
-            null
+            @Suppress("UNREACHABLE_CODE") null
+        } finally {
+            if (background) { lastBackgroundAt = System.currentTimeMillis(); backgroundGate.unlock() } else userInFlight.decrementAndGet()
         }
     }
 
@@ -296,21 +424,6 @@ class SpotifyApi(private val auth: SpotifyAuth) {
             put("offset", buildJsonObject { put("uri", itemUri) })
         })
 
-    private suspend fun sendOk(method: String, url: String, body: JsonObject?): Boolean = withContext(Dispatchers.IO) {
-        val token = auth.accessToken() ?: return@withContext false
-        val rb = (body?.let { json.encodeToString(it) } ?: "").toRequestBody(jsonType)
-        val req = Request.Builder().url(url).header("Authorization", "Bearer $token").method(method, rb).build()
-        try {
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) Log.w(TAG, "$method ${url.removePrefix(BASE)} -> ${resp.code}")
-                resp.isSuccessful
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "$method failed: ${e.javaClass.simpleName}")
-            false
-        }
-    }
-
     companion object {
         private const val BASE = "https://api.spotify.com/v1"
         private const val TAG = "MotifApi"
@@ -320,5 +433,13 @@ class SpotifyApi(private val auth: SpotifyAuth) {
         private const val LIBRARY_MAX = 40
         /** Releases fetched per artist for the discography (four pages of 50). */
         private const val ARTIST_ALBUMS_MAX = 200
+        /** A user call waits out a 429 once when Retry-After is at most this long; longer waits are shown instead. */
+        private const val RETRY_WAIT_MAX_MS = 15_000L
+        /** When a 429 comes without Retry-After. */
+        private const val DEFAULT_RETRY_AFTER_S = 30L
+        /** The background pass stays off this long after any 429. */
+        private const val BACKGROUND_PAUSE_MS = 60_000L
+        /** Spacing between background calls. */
+        private const val BACKGROUND_GAP_MS = 600L
     }
 }

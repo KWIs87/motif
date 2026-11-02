@@ -27,8 +27,8 @@ android {
         applicationId = "com.kirkisham.motif"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "0.12"
+        versionCode = 16
+        versionName = "0.12.1"
 
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"${cfg("SPOTIFY_CLIENT_ID", "9343a80fdf824a4e8c1b896312207ff0")}\"")
         buildConfigField("String", "SPOTIFY_REDIRECT_URI", "\"motif://callback\"")
@@ -96,6 +96,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
+
+    // Unit tests (0.12.1): alarm trigger resolution.
+    testImplementation("junit:junit:4.13.2")
 
     // Spotify App Remote (playback control through the installed Spotify app).
     // CI downloads the AAR from github.com/spotify/android-sdk into app/libs; a developer machine does the same by hand.

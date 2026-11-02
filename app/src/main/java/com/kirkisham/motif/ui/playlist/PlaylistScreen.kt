@@ -36,6 +36,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -52,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kirkisham.motif.MotifApp
+import com.kirkisham.motif.auth.SpotifyApi
 import com.kirkisham.motif.ui.MINI_PLAYER_SPACE
 import com.kirkisham.motif.data.SpArtist
 import com.kirkisham.motif.data.SpPlaylist
@@ -77,6 +79,7 @@ import com.kirkisham.motif.ui.components.formatLength
 import com.kirkisham.motif.ui.components.pluralSongs
 import com.kirkisham.motif.ui.motif
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -131,6 +134,19 @@ fun PlaylistScreen(
         }
         if (items == null) app.library.refreshTracks(playlistId)
     }
+    // Load failures (0.12.1): the cause as one line instead of "Loading songs" for good. A rate limit counts
+    // down and retries by itself when Spotify's Retry-After is up; anything else retries on tap.
+    val trackErrors by app.library.trackErrors.collectAsStateWithLifecycle()
+    val loadError = trackErrors[playlistId]
+    val rateLimitedUntil by app.api.rateLimitedUntil.collectAsStateWithLifecycle()
+    var clock by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var retrying by remember { mutableStateOf(false) }
+    LaunchedEffect(loadError, rateLimitedUntil) {
+        if (loadError !is SpotifyApi.ApiError.RateLimited) return@LaunchedEffect
+        while (System.currentTimeMillis() < rateLimitedUntil) { clock = System.currentTimeMillis(); delay(1_000) }
+        if (items == null) { retrying = true; app.library.refreshTracks(playlistId); retrying = false }
+    }
+    val retryLoad: () -> Unit = { if (!retrying) scope.launch { retrying = true; app.library.refreshTracks(playlistId); retrying = false } }
     // Spotify (February 2026) only shares the contents of playlists the user owns or collaborates on.
     val notShared = playlist != null && !playlist.hasItems && items.isNullOrEmpty()
 
@@ -245,6 +261,10 @@ fun PlaylistScreen(
                 }
                 line?.let { PlainLine(it, Modifier.padding(start = 8.dp)) }
                 if (notShared) PlainLine(NOT_SHARED_LINE, Modifier.padding(start = 8.dp))
+                else if (items == null && loadError != null && !retrying) PlainLine(
+                    app.library.describe(loadError, "songs", clock),
+                    Modifier.fillMaxWidth().clickable(enabled = loadError !is SpotifyApi.ApiError.RateLimited, onClick = retryLoad).padding(start = 8.dp),
+                )
                 else if (items == null) PlainLine("Loading songs", Modifier.padding(start = 8.dp))
                 else if (source.isEmpty()) PlainLine("No songs in this playlist yet.", Modifier.padding(start = 8.dp))
             }

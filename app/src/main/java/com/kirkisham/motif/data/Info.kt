@@ -208,7 +208,7 @@ class Info(private val api: SpotifyApi, private val cacheDir: File) {
     }
     private var pcDirty = false
     private var pcFlush: Job? = null
-    private val pcGate = Semaphore(4)
+    private val pcGate = Semaphore(2) // 0.12.1: was 4; two in flight keeps Last.fm quiet while rows scroll
     private val _playCounts = MutableStateFlow<Map<String, PlayCount>>(emptyMap())
     val playCounts: StateFlow<Map<String, PlayCount>> = _playCounts.asStateFlow()
 

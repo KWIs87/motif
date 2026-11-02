@@ -48,6 +48,7 @@ import com.kirkisham.motif.ui.playlist.MassEditScreen
 import com.kirkisham.motif.ui.playlist.PlaylistScreen
 import com.kirkisham.motif.ui.playlists.AllPlaylistsScreen
 import com.kirkisham.motif.ui.search.SearchScreen
+import com.kirkisham.motif.ui.settings.DiagnosticsScreen
 import com.kirkisham.motif.ui.settings.SettingsScreen
 
 /** Route names. Screens are added here as the build order reaches them (CLAUDE.md). */
@@ -57,6 +58,7 @@ object Routes {
     const val PLAYLIST = "playlist/{id}"
     const val NOW = "now"
     const val SETTINGS = "settings"
+    const val DIAGNOSTICS = "diagnostics"
     const val ALARMS = "alarms"
     const val ALARM_EDIT = "alarm/{id}"
     const val ALARM_LOG = "alarmlog"
@@ -214,7 +216,8 @@ fun MotifNavHost(
                     onOpenAlbum = { nav.navigate(Routes.album(it)) }, onOpenGenre = { nav.navigate(Routes.genre(it)) },
                 )
             }
-            composable(Routes.SETTINGS) { SettingsScreen(app, onBack = { nav.popBackStack() }) }
+            composable(Routes.SETTINGS) { SettingsScreen(app, onBack = { nav.popBackStack() }, onDiagnostics = { nav.navigate(Routes.DIAGNOSTICS) }) }
+            composable(Routes.DIAGNOSTICS) { DiagnosticsScreen(app, onBack = { nav.popBackStack() }) }
             // Alarms (0.12): list, edit (alarm/{id} or alarm/new) and the log.
             composable(Routes.ALARMS) {
                 AlarmsListScreen(

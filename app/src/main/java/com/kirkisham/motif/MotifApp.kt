@@ -1,11 +1,13 @@
 package com.kirkisham.motif
 
 import android.app.Application
+import com.kirkisham.motif.alarm.AlarmLog
 import com.kirkisham.motif.alarm.AlarmScheduler
 import com.kirkisham.motif.alarm.AlarmStore
 import com.kirkisham.motif.auth.SpotifyApi
 import com.kirkisham.motif.auth.SpotifyAuth
 import com.kirkisham.motif.auth.TokenStore
+import com.kirkisham.motif.data.ApiLog
 import com.kirkisham.motif.data.Devices
 import com.kirkisham.motif.data.Info
 import com.kirkisham.motif.data.Library
@@ -64,6 +66,7 @@ class MotifApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        ApiLog.init(filesDir)
         tokenStore = TokenStore(this)
         spotifyAuth = SpotifyAuth(this, tokenStore)
         api = SpotifyApi(spotifyAuth)
@@ -79,6 +82,10 @@ class MotifApp : Application() {
         undo = UndoManager(appScope)
         alarmStore = AlarmStore(this)
         alarmScheduler = AlarmScheduler(this, alarmStore)
+
+        // Alarms (0.12.1): make sure every enabled alarm is still set with AlarmManager whenever the process
+        // starts. Idempotent; restores alarms the system dropped (force stop, app sleep) and logs misses.
+        appScope.launch { runCatching { alarmScheduler.rescheduleAll("app start") }.onFailure { AlarmLog.error(this@MotifApp, "rescheduleAll", it) } }
 
         // "In a playlist" index (0.11): load it, then re-run the background pass whenever the playlist list changes.
         appScope.launch {

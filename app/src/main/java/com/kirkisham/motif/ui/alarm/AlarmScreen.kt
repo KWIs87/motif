@@ -74,6 +74,7 @@ import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.kirkisham.motif.MotifApp
 import com.kirkisham.motif.alarm.Alarm
+import com.kirkisham.motif.alarm.AlarmLog
 import com.kirkisham.motif.alarm.AlarmSong
 import com.kirkisham.motif.alarm.OrderMode
 import com.kirkisham.motif.ui.components.Chip
@@ -138,13 +139,13 @@ fun AlarmScreen(app: MotifApp, alarmId: String?, onBack: () -> Unit) {
     fun save() {
         if (draft.name.isBlank()) { line = "Give the alarm a name first."; return }
         if (!draft.oneTime && draft.days.isEmpty()) { line = "Pick at least one day."; return }
-        var a = draft.copy(enabled = true, fadeSeconds = draft.fadeSeconds.coerceIn(0, ((draft.songs.firstOrNull()?.durationMs ?: 0L) / 1000).toInt()))
-        // A one-time alarm whose date is already past rolls to its next occurrence; keep the stored date honest.
-        if (a.oneTime) a.nextTrigger()?.let { a = a.copy(date = it.toLocalDate().toString()) }
-        val saved = a
+        // One function resolves what is stored (date stamped with the day it will ring; see AlarmTriggerTest),
+        // and the same saved object is what gets scheduled, never the draft.
+        val saved = draft.resolveForSave()
         scope.launch {
             app.alarmStore.save(saved)
             app.alarmScheduler.schedule(saved)
+            AlarmLog.log(context, "saved", "${AlarmLog.idOf(saved.id)} ${Alarm.formatTime(saved.hour, saved.minute)} " + (if (saved.oneTime) "once on ${saved.date}" else Alarm.daysLabel(saved.days)))
             if (AlarmPermissionStatus.needsNotificationRequest(context)) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             onBack()
         }

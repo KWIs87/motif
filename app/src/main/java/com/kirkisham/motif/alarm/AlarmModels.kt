@@ -76,6 +76,18 @@ data class Alarm(
         return null
     }
 
+    /**
+     * What the editor's Save stores (0.12.1, pulled out of the screen so it can be tested with a fixed
+     * clock): the alarm switched on, the fade clamped to the first song, and for a one-time alarm the
+     * date stamped with the day [nextTrigger] says it will ring at [now], so the stored object, the
+     * scheduler and the list's "Rings in" all agree. Recurring alarms keep their fields.
+     */
+    fun resolveForSave(now: ZonedDateTime = ZonedDateTime.now()): Alarm {
+        var a = copy(enabled = true, fadeSeconds = fadeSeconds.coerceIn(0, ((songs.firstOrNull()?.durationMs ?: 0L) / 1000).toInt()))
+        if (a.oneTime) a.nextTrigger(now)?.let { a = a.copy(date = it.toLocalDate().toString()) }
+        return a
+    }
+
     /** "6:30 AM · Mon to Fri · 3 songs · fade 1:30" for the saved list. */
     fun summary(): String {
         val t = formatTime(hour, minute)

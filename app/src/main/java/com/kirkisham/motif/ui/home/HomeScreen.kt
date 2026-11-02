@@ -33,6 +33,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.runtime.setValue
@@ -43,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kirkisham.motif.MotifApp
+import kotlinx.coroutines.launch
 import com.kirkisham.motif.ui.MINI_PLAYER_SPACE
 import com.kirkisham.motif.data.LastEpisode
 import com.kirkisham.motif.data.SpPlaylist
@@ -88,6 +90,7 @@ fun HomeScreen(
     val playback by app.remote.playback.collectAsStateWithLifecycle()
     val connection by app.remote.connection.collectAsStateWithLifecycle()
     val notice by app.player.notice.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
 
     var menuTarget by remember { mutableStateOf<SpPlaylist?>(null) }
     var showPodcasts by remember { mutableStateOf(false) }
@@ -131,7 +134,8 @@ fun HomeScreen(
             }
             connectionLine(connection)?.let { line -> item { PlainLine(line) } }
             notice?.let { line -> item { PlainLine(line) } }
-            status?.let { line -> item { PlainLine(line) } }
+            // 0.12.1: the line names the cause (rate limit, sign-in, network) and a tap retries.
+            status?.let { line -> item { PlainLine(line, Modifier.fillMaxWidth().clickable { scope.launch { app.library.refreshPlaylists() } }) } }
             if (playlists == null && status == null) item { PlainLine("Loading playlists") }
 
             if (filtering) {
