@@ -209,7 +209,10 @@ fun MotifNavHost(
                 )
             }
             composable(Routes.NOW) {
-                NowPlayingScreen(app, onBack = { nav.popBackStack() }, onOpenInfo = { nav.navigate(Routes.infoTrack(it)) }, onDevices = onDevices)
+                NowPlayingScreen(
+                    app, onBack = { nav.popBackStack() }, onOpenInfo = { nav.navigate(Routes.infoTrack(it)) }, onDevices = onDevices,
+                    onOpenAlbum = { nav.navigate(Routes.album(it)) }, onOpenGenre = { nav.navigate(Routes.genre(it)) },
+                )
             }
             composable(Routes.SETTINGS) { SettingsScreen(app, onBack = { nav.popBackStack() }) }
             // Alarms (0.12): list, edit (alarm/{id} or alarm/new) and the log.

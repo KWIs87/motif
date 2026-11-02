@@ -10,6 +10,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -79,7 +81,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kirkisham.motif.MotifApp
+import com.kirkisham.motif.data.Info
 import com.kirkisham.motif.data.LyricLine
+import com.kirkisham.motif.data.SpTrack
 import com.kirkisham.motif.data.SpotifyRemote
 import com.kirkisham.motif.ui.components.AddTarget
 import com.kirkisham.motif.ui.components.AddToHost
@@ -95,6 +99,7 @@ import com.kirkisham.motif.ui.motif
 import com.spotify.protocol.types.Image
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 private val SPEEDS = listOf(1f, 1.25f, 1.5f, 2f)
 
@@ -103,7 +108,14 @@ private val SPEEDS = listOf(1f, 1.25f, 1.5f, 2f)
  * current item: songs get previous/next, plus and Lyrics; episodes get 15 s skips, speed and sleep.
  */
 @Composable
-fun NowPlayingScreen(app: MotifApp, onBack: () -> Unit, onOpenInfo: (String) -> Unit, onDevices: () -> Unit) {
+fun NowPlayingScreen(
+    app: MotifApp,
+    onBack: () -> Unit,
+    onOpenInfo: (String) -> Unit,
+    onDevices: () -> Unit,
+    onOpenAlbum: (String) -> Unit = {},
+    onOpenGenre: (String) -> Unit = {},
+) {
     val playback by app.remote.playback.collectAsStateWithLifecycle()
     val contextTitle by app.remote.contextTitle.collectAsStateWithLifecycle()
     val notice by app.player.notice.collectAsStateWithLifecycle()
@@ -144,7 +156,7 @@ fun NowPlayingScreen(app: MotifApp, onBack: () -> Unit, onOpenInfo: (String) -> 
     ) {
         val speaker: @Composable () -> Unit = { SpeakerAction(elsewhere?.name, onDevices) }
         if (p.isEpisode) PodcastBody(app, p, positionMs, contextTitle, art, onBack, share, speaker)
-        else SongBody(app, p, positionMs, contextTitle, art, onBack, share, speaker, onOpenInfo = { onOpenInfo(p.uri.substringAfterLast(':')) })
+        else SongBody(app, p, positionMs, contextTitle, art, onBack, share, speaker, onOpenInfo = { onOpenInfo(p.uri.substringAfterLast(':')) }, onOpenAlbum = onOpenAlbum, onOpenGenre = onOpenGenre)
         notice?.let { PlainLine(it) }
     }
 }
@@ -226,6 +238,8 @@ private fun ColumnScope.SongBody(
     onShare: () -> Unit,
     speaker: @Composable () -> Unit,
     onOpenInfo: () -> Unit,
+    onOpenAlbum: (String) -> Unit,
+    onOpenGenre: (String) -> Unit,
 ) {
     var lyrics by remember { mutableStateOf<List<LyricLine>?>(null) }
     var showLyrics by remember { mutableStateOf(false) }
@@ -290,6 +304,9 @@ private fun ColumnScope.SongBody(
         Text(p.title, style = MaterialTheme.typography.titleLarge, color = motif.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(p.artist, style = MaterialTheme.typography.bodyMedium, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         line?.let { PlainLine(it) }
+        Spacer(Modifier.weight(1f))
+        // Album block (0.12): fixed height so the scrubber and controls never move while it fills in.
+        AlbumBlock(app, p, onOpenAlbum, onOpenGenre)
     }
 
     Scrubber(p, positionMs, onSeek = { app.player.seekTo(it) }, rightLabel = "-" + formatClock(p.durationMs - positionMs))
@@ -318,6 +335,71 @@ private fun ColumnScope.SongBody(
 
     AddToHost(app, addTarget, newPlaylistFor, onDismiss = { addTarget = null; newPlaylistFor = null }, onDone = { line = it })
 }
+
+/**
+ * Album info under the art (0.12): line 1 "Album · 2019 · track 4 of 12" (album name opens the Album
+ * screen), line 2 "1.2M plays · 98K listeners" from Last.fm when known, line 3 the tag chips (same
+ * filtering as Song and artist info), scrolling sideways; a chip opens Genre. Muted and small; the
+ * block keeps a fixed height whether or not the lines have landed, so nothing below it moves.
+ */
+@Composable
+private fun AlbumBlock(app: MotifApp, p: SpotifyRemote.Playback, onOpenAlbum: (String) -> Unit, onOpenGenre: (String) -> Unit) {
+    var track by remember { mutableStateOf<SpTrack?>(null) }
+    var tags by remember { mutableStateOf<List<String>>(emptyList()) }
+    val counts by app.info.playCounts.collectAsStateWithLifecycle()
+    val isTrack = p.uri.startsWith("spotify:track:")
+    LaunchedEffect(p.uri) {
+        track = null; tags = emptyList()
+        if (!isTrack) return@LaunchedEffect
+        val t = runCatching { app.api.track(p.uri.substringAfterLast(':')) }.getOrNull() ?: return@LaunchedEffect
+        track = t
+        launch { runCatching { app.info.playCount(t) } }
+        launch { tags = runCatching { app.info.tags(t) }.getOrDefault(emptyList()) }
+    }
+    val t = track
+    val pc = counts[p.uri]?.takeIf { it.known && it.plays > 0 }
+    Column(Modifier.fillMaxWidth().height(ALBUM_BLOCK_HEIGHT), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // Line 1: album · year · track N of M. The album name alone is the tap target.
+        val albumName = t?.album?.name ?: p.album.takeIf { it.isNotBlank() }
+        val albumId = t?.album?.albumId ?: p.albumUri?.takeIf { it.startsWith("spotify:album:") }?.substringAfterLast(':')
+        if (albumName != null) {
+            Row(Modifier.fillMaxWidth().height(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    albumName, fontSize = 12.sp, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false).then(if (albumId != null) Modifier.clickable { onOpenAlbum(albumId) } else Modifier),
+                )
+                val rest = buildList {
+                    t?.album?.year?.let { add(it) }
+                    val n = t?.track_number; val m = t?.album?.total_tracks
+                    if (n != null && m != null && m > 0) add("track $n of $m")
+                }
+                if (rest.isNotEmpty()) Text(" · " + rest.joinToString(" · "), fontSize = 12.sp, color = motif.textMuted, maxLines = 1, softWrap = false)
+            }
+        } else Spacer(Modifier.height(18.dp))
+        // Line 2: plays · listeners.
+        Box(Modifier.height(16.dp)) {
+            if (pc != null) Text(
+                Info.abbrev(pc.plays) + " plays" + (if (pc.listeners > 0) " · " + Info.abbrev(pc.listeners) + " listeners" else ""),
+                fontSize = 11.sp, color = motif.textMuted, maxLines = 1,
+            )
+        }
+        // Line 3: tag chips, one row, sideways scroll.
+        Row(
+            Modifier.fillMaxWidth().height(26.dp).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically,
+        ) {
+            tags.forEach { tag ->
+                Box(
+                    Modifier.height(24.dp).clip(RoundedCornerShape(12.dp)).border(1.dp, motif.chipLine, RoundedCornerShape(12.dp)).clickable { onOpenGenre(tag) }.padding(horizontal = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text(tag.replaceFirstChar { it.titlecase(Locale.getDefault()) }, fontSize = 11.sp, color = motif.textMuted, maxLines = 1, softWrap = false) }
+            }
+        }
+    }
+}
+
+/** 18 + 16 + 26 dp of lines plus two 4 dp gaps. */
+private val ALBUM_BLOCK_HEIGHT = 68.dp
 
 /** Synced lyrics: current line in text color, others muted; keeps the current line near the top third. */
 @Composable

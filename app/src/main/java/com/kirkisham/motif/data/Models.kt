@@ -102,6 +102,8 @@ data class SpTrack(
     val is_local: Boolean = false,
     /** Spotify's 0–100 popularity; only on full track objects (GET /tracks/{id}, search). */
     val popularity: Int? = null,
+    /** 1-based position on its album (full and simplified track objects); Now playing's "track N of M" (0.12). */
+    val track_number: Int? = null,
 ) {
     val artistNames: String get() = artists.joinToString(", ") { it.name }
     val coverUrl: String? get() = album?.images?.firstOrNull()?.url
