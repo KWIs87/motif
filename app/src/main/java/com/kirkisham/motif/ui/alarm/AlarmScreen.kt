@@ -1,12 +1,8 @@
 package com.kirkisham.motif.ui.alarm
 
-import android.app.NotificationManager
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import android.os.Build
-import android.os.PowerManager
-import android.provider.Settings
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -42,8 +38,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
@@ -77,14 +71,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.kirkisham.motif.MotifApp
 import com.kirkisham.motif.alarm.Alarm
 import com.kirkisham.motif.alarm.AlarmSong
 import com.kirkisham.motif.alarm.OrderMode
 import com.kirkisham.motif.ui.components.Chip
-import com.kirkisham.motif.ui.components.ConfirmSheet
 import com.kirkisham.motif.ui.components.Hairline
 import com.kirkisham.motif.ui.components.IconButton44
 import com.kirkisham.motif.ui.components.MotifTextField
@@ -93,7 +85,6 @@ import com.kirkisham.motif.ui.components.PlainLine
 import com.kirkisham.motif.ui.components.SectionLabel
 import com.kirkisham.motif.ui.components.TopBar
 import com.kirkisham.motif.ui.MINI_PLAYER_SPACE
-import com.kirkisham.motif.ui.components.combinedClickableCompat
 import com.kirkisham.motif.ui.components.formatClock
 import com.kirkisham.motif.ui.motif
 import com.kirkisham.motif.ui.settings.MotifSlider
@@ -112,52 +103,50 @@ import kotlin.math.roundToInt
 private val PLAY_FOR = listOf(5, 10, 20)
 private val SNOOZE = listOf(5, 10, 15)
 
-/** Alarm editor plus the saved list (board Alarm, spec §3.8). */
+/**
+ * Alarm editor (board Alarm, spec §3.8). Since 0.12 it is the edit screen reached from the Alarms
+ * list: [alarmId] null means a new alarm; Save writes, schedules and returns to the list.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun AlarmScreen(app: MotifApp, onBack: () -> Unit) {
-    val saved by app.alarmStore.alarms.collectAsStateWithLifecycle(emptyList())
+fun AlarmScreen(app: MotifApp, alarmId: String?, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var draft by remember { mutableStateOf(Alarm.blank(UUID.randomUUID().toString())) }
-    var editingExisting by remember { mutableStateOf(false) }
+    val editingExisting = alarmId != null
+    var loaded by remember { mutableStateOf(alarmId == null) }
     // Time entry (0.11): an inline keypad under the big time replaces the Material dial sheet.
     // Open from the start for a new alarm; Edit opens it on tap. [digits] is the dialer-style entry.
-    var keypadOpen by remember { mutableStateOf(true) }
+    var keypadOpen by remember { mutableStateOf(alarmId == null) }
     var digits by remember { mutableStateOf("") }
     var pickDate by remember { mutableStateOf(false) }
     var pickSongs by remember { mutableStateOf(false) }
     var customMinutes by remember { mutableStateOf(false) }
-    var deleting by remember { mutableStateOf<Alarm?>(null) }
     var line by remember { mutableStateOf<String?>(null) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    var exactOk by remember { mutableStateOf(app.alarmScheduler.canScheduleExact()) }
-    var batteryOk by remember { mutableStateOf(pm.isIgnoringBatteryOptimizations(context.packageName)) }
-    var fullScreenOk by remember { mutableStateOf(Build.VERSION.SDK_INT < 34 || nm.canUseFullScreenIntent()) }
-    // Re-check permissions every few seconds so the lines disappear after the user grants them in Settings.
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(3_000)
-            now = System.currentTimeMillis()
-            exactOk = app.alarmScheduler.canScheduleExact()
-            batteryOk = pm.isIgnoringBatteryOptimizations(context.packageName)
-            fullScreenOk = Build.VERSION.SDK_INT < 34 || nm.canUseFullScreenIntent()
+    LaunchedEffect(alarmId) {
+        if (alarmId != null) {
+            val a = app.alarmStore.get(alarmId)
+            if (a == null) { onBack(); return@LaunchedEffect }
+            draft = a; loaded = true
         }
     }
+    LaunchedEffect(Unit) { while (true) { delay(3_000); now = System.currentTimeMillis() } }
+    // Notifications (0.12): nothing rings visibly on Android 13+ without them, so Save asks if still missing.
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     fun save() {
         if (draft.name.isBlank()) { line = "Give the alarm a name first."; return }
         if (!draft.oneTime && draft.days.isEmpty()) { line = "Pick at least one day."; return }
-        val a = draft.copy(enabled = true, fadeSeconds = draft.fadeSeconds.coerceIn(0, ((draft.songs.firstOrNull()?.durationMs ?: 0L) / 1000).toInt()))
+        var a = draft.copy(enabled = true, fadeSeconds = draft.fadeSeconds.coerceIn(0, ((draft.songs.firstOrNull()?.durationMs ?: 0L) / 1000).toInt()))
+        // A one-time alarm whose date is already past rolls to its next occurrence; keep the stored date honest.
+        if (a.oneTime) a.nextTrigger()?.let { a = a.copy(date = it.toLocalDate().toString()) }
+        val saved = a
         scope.launch {
-            app.alarmStore.save(a)
-            app.alarmScheduler.schedule(a)
-            line = if (a.songs.isEmpty()) "Saved. No songs yet, so it will ring with the built-in tone." else "Saved."
-            draft = Alarm.blank(UUID.randomUUID().toString())
-            editingExisting = false
-            digits = ""; keypadOpen = true
+            app.alarmStore.save(saved)
+            app.alarmScheduler.schedule(saved)
+            if (AlarmPermissionStatus.needsNotificationRequest(context)) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            onBack()
         }
     }
 
@@ -187,6 +176,7 @@ fun AlarmScreen(app: MotifApp, onBack: () -> Unit) {
         draft = draft.copy(songs = l)
     }
 
+    if (!loaded) return
     val firstLen = ((draft.songs.firstOrNull()?.durationMs ?: 0L) / 1000).toInt()
     val next = remember(draft, now) { draft.copy(enabled = true).nextTrigger() }
 
@@ -213,31 +203,6 @@ fun AlarmScreen(app: MotifApp, onBack: () -> Unit) {
         item {
             TopBar(if (editingExisting) "Edit alarm" else "New alarm", onBack) {
                 PillButton("Save", onClick = { save() }, modifier = Modifier.height(36.dp))
-            }
-        }
-        if (!exactOk || !batteryOk || !fullScreenOk) item {
-            Column(Modifier.padding(start = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (!exactOk) Text(
-                    "Android needs permission for exact alarms so this rings on time. Tap to allow.",
-                    style = MaterialTheme.typography.bodySmall, color = motif.accent,
-                    modifier = Modifier.clickable {
-                        if (Build.VERSION.SDK_INT >= 31) context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))
-                    },
-                )
-                if (!fullScreenOk) Text(
-                    "Android needs permission to show the alarm over the lock screen. Tap to allow.",
-                    style = MaterialTheme.typography.bodySmall, color = motif.accent,
-                    modifier = Modifier.clickable {
-                        if (Build.VERSION.SDK_INT >= 34) context.startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:${context.packageName}")))
-                    },
-                )
-                if (!batteryOk) Text(
-                    "Battery optimization can delay alarms. Tap to exempt Motif.",
-                    style = MaterialTheme.typography.bodySmall, color = motif.accent,
-                    modifier = Modifier.clickable {
-                        context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}")))
-                    },
-                )
             }
         }
         line?.let { l -> item { PlainLine(l, Modifier.padding(start = 8.dp)) } }
@@ -290,7 +255,8 @@ fun AlarmScreen(app: MotifApp, onBack: () -> Unit) {
                     Chip("Recurring", !draft.oneTime, { draft = draft.copy(oneTime = false) }, height = 32.dp)
                 }
                 if (draft.oneTime) {
-                    val d = draft.date?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: LocalDate.now().plusDays(1)
+                    // No date picked: show the day it will actually ring (the next occurrence of the time).
+                    val d = next?.toLocalDate() ?: draft.date?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: LocalDate.now()
                     Row(
                         Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(10.dp)).border(1.dp, motif.chipLine, RoundedCornerShape(10.dp)).clickable { pickDate = true }.padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -415,50 +381,12 @@ fun AlarmScreen(app: MotifApp, onBack: () -> Unit) {
             }
         }
 
-        // Saved alarms
-        item {
-            Column(Modifier.padding(start = 8.dp)) {
-                SectionLabel("Saved alarms", Modifier.padding(bottom = 8.dp))
-                if (saved.isEmpty()) PlainLine("No alarms yet.")
-                saved.forEach { a ->
-                    Row(
-                        Modifier.fillMaxWidth().height(64.dp)
-                            .combinedClickableCompat(true, { draft = a; editingExisting = true; line = null; keypadOpen = false; digits = "" }, { deleting = a }),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(a.name.ifBlank { "Alarm" }, style = MaterialTheme.typography.titleMedium, color = if (a.enabled) motif.text else motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(a.summary(), style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        Switch(
-                            checked = a.enabled,
-                            onCheckedChange = { on -> scope.launch { app.alarmStore.setEnabled(a.id, on); app.alarmScheduler.schedule(a.copy(enabled = on)) } },
-                            colors = SwitchDefaults.colors(checkedTrackColor = motif.accent, checkedThumbColor = motif.ground, uncheckedTrackColor = motif.card, uncheckedThumbColor = motif.textMuted, uncheckedBorderColor = motif.chipLine),
-                        )
-                    }
-                    Hairline()
-                }
-                Text("Tap a saved alarm to load it into the form above; long press to delete.", style = MaterialTheme.typography.bodySmall, color = motif.textMuted, modifier = Modifier.padding(top = 8.dp), lineHeight = 18.sp)
-            }
-        }
     }
     }
 
-    if (pickDate) DateSheet(draft.date, onPick = { draft = draft.copy(date = it.toString()) }, onDismiss = { pickDate = false })
+    if (pickDate) DateSheet(draft.date ?: next?.toLocalDate()?.toString(), onPick = { draft = draft.copy(date = it.toString()) }, onDismiss = { pickDate = false })
     if (pickSongs) SongPickerSheet(app, draft.songs, onAdd = { draft = draft.copy(songs = draft.songs + it) }, onDismiss = { pickSongs = false })
     if (customMinutes) MinutesSheet(draft.playForMinutes, onPick = { draft = draft.copy(playForMinutes = it) }, onDismiss = { customMinutes = false })
-    deleting?.let { a ->
-        ConfirmSheet("Delete “${a.name.ifBlank { "Alarm" }}”?", "Delete",
-            onConfirm = {
-                scope.launch {
-                    app.alarmScheduler.cancel(a.id); app.alarmStore.delete(a.id)
-                    if (draft.id == a.id) { draft = Alarm.blank(UUID.randomUUID().toString()); editingExisting = false; digits = ""; keypadOpen = true }
-                    // Undo (0.10): the alarm object is in hand, so undo saves and schedules it again.
-                    app.undo.post("Deleted", undo = { app.alarmStore.save(a); if (a.enabled) app.alarmScheduler.schedule(a) })
-                }
-            },
-            onDismiss = { deleting = null })
-    }
 }
 
 private fun ringsIn(next: ZonedDateTime?, nowMs: Long): String {

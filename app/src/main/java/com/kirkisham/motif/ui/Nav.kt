@@ -26,7 +26,9 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.kirkisham.motif.MotifApp
 import com.kirkisham.motif.data.LastEpisode
+import com.kirkisham.motif.ui.alarm.AlarmLogScreen
 import com.kirkisham.motif.ui.alarm.AlarmScreen
+import com.kirkisham.motif.ui.alarm.AlarmsListScreen
 import com.kirkisham.motif.ui.album.AlbumScreen
 import com.kirkisham.motif.ui.components.AddTarget
 import com.kirkisham.motif.ui.components.AddToHost
@@ -55,7 +57,9 @@ object Routes {
     const val PLAYLIST = "playlist/{id}"
     const val NOW = "now"
     const val SETTINGS = "settings"
-    const val ALARM = "alarm"
+    const val ALARMS = "alarms"
+    const val ALARM_EDIT = "alarm/{id}"
+    const val ALARM_LOG = "alarmlog"
     const val SEARCH = "search?q={q}"
     const val MASS_EDIT = "massedit/{id}"
     const val INFO = "info/{kind}/{id}"
@@ -63,6 +67,8 @@ object Routes {
     const val PERSON = "person/{name}?discogs={discogs}&genius={genius}"
     const val GENRE = "genre/{tag}"
     fun playlist(id: String) = "playlist/$id"
+    /** Edit screen: a saved alarm's id, or "new" for a blank one. */
+    fun alarmEdit(id: String? = null) = "alarm/" + (id ?: "new")
     fun search(query: String = "") = "search?q=" + Uri.encode(query)
     fun massEdit(id: String) = "massedit/$id"
     fun infoTrack(id: String) = "info/track/$id"
@@ -116,7 +122,7 @@ fun MotifNavHost(
                     app = app,
                     onOpenPlaylist = { nav.navigate(Routes.playlist(it)) },
                     onOpenAll = { nav.navigate(Routes.ALL) },
-                    onOpenAlarm = { nav.navigate(Routes.ALARM) },
+                    onOpenAlarm = { nav.navigate(Routes.ALARMS) },
                     onOpenSettings = { nav.navigate(Routes.SETTINGS) },
                     onOpenSearch = { nav.navigate(Routes.search(it)) },
                 )
@@ -206,7 +212,21 @@ fun MotifNavHost(
                 NowPlayingScreen(app, onBack = { nav.popBackStack() }, onOpenInfo = { nav.navigate(Routes.infoTrack(it)) }, onDevices = onDevices)
             }
             composable(Routes.SETTINGS) { SettingsScreen(app, onBack = { nav.popBackStack() }) }
-            composable(Routes.ALARM) { AlarmScreen(app, onBack = { nav.popBackStack() }) }
+            // Alarms (0.12): list, edit (alarm/{id} or alarm/new) and the log.
+            composable(Routes.ALARMS) {
+                AlarmsListScreen(
+                    app,
+                    onBack = { nav.popBackStack() },
+                    onNew = { nav.navigate(Routes.alarmEdit()) },
+                    onEdit = { nav.navigate(Routes.alarmEdit(it)) },
+                    onLog = { nav.navigate(Routes.ALARM_LOG) },
+                )
+            }
+            composable(Routes.ALARM_EDIT) { entry ->
+                val id = entry.arguments?.getString("id")?.takeIf { it != "new" }
+                AlarmScreen(app, alarmId = id, onBack = { nav.popBackStack() })
+            }
+            composable(Routes.ALARM_LOG) { AlarmLogScreen(onBack = { nav.popBackStack() }) }
         }
         }
 

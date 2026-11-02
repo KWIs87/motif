@@ -108,10 +108,14 @@ data class Alarm(
             return sorted.joinToString(", ") { DayOfWeek.of(it).name.take(3).lowercase().replaceFirstChar(Char::uppercase) }
         }
 
-        /** The default for a new alarm: the next 6:30 on weekdays. */
+        /**
+         * The default for a new alarm: the next 6:30 on weekdays. The one-time date is left null so
+         * that, if the user switches to One time without picking a date, it fires at the next
+         * occurrence of the time (today if still ahead) rather than tomorrow (0.12).
+         */
         fun blank(id: String) = Alarm(
             id = id, name = "", hour = 6, minute = 30, oneTime = false,
-            days = setOf(1, 2, 3, 4, 5), date = LocalDate.now().plusDays(1).toString(),
+            days = setOf(1, 2, 3, 4, 5), date = null,
         )
     }
 }
