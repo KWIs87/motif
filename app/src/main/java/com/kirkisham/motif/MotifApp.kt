@@ -12,6 +12,7 @@ import com.kirkisham.motif.data.Lyrics
 import com.kirkisham.motif.data.PlaybackController
 import com.kirkisham.motif.data.Prefs
 import com.kirkisham.motif.data.SpotifyRemote
+import com.kirkisham.motif.data.Updates
 import com.kirkisham.motif.widget.MotifWidget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,6 +42,8 @@ class MotifApp : Application() {
         private set
     lateinit var info: Info
         private set
+    lateinit var updates: Updates
+        private set
     lateinit var alarmStore: AlarmStore
         private set
     lateinit var alarmScheduler: AlarmScheduler
@@ -59,6 +62,7 @@ class MotifApp : Application() {
         player = PlaybackController(remote, prefs, library)
         lyrics = Lyrics()
         info = Info(api)
+        updates = Updates(this, prefs)
         alarmStore = AlarmStore(this)
         alarmScheduler = AlarmScheduler(this, alarmStore)
 

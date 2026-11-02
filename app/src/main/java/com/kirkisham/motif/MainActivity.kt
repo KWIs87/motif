@@ -46,6 +46,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         loggedIn = app.tokenStore.isLoggedIn
         handleIntent(intent)
+        // Updates row: look at the latest release at most once every 6 hours (spec §4).
+        if (loggedIn) app.appScope.launch { app.updates.checkIfDue() }
         setContent {
             val appearance by app.prefs.appearance.collectAsStateWithLifecycle(Appearance())
             MotifTheme(appearance) {

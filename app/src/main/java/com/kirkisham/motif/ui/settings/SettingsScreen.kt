@@ -54,6 +54,7 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(app: MotifApp, onBack: () -> Unit) {
     val appearance by app.prefs.appearance.collectAsStateWithLifecycle(Appearance())
     val widgetUsesApp by app.prefs.widgetUsesApp.collectAsStateWithLifecycle(true)
+    val update by app.updates.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var picking by remember { mutableStateOf<String?>(null) } // "text", "bg", "glow"
 
@@ -102,6 +103,48 @@ fun SettingsScreen(app: MotifApp, onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall, color = motif.textMuted, modifier = Modifier.padding(top = 10.dp), lineHeight = 18.sp,
             )
         }
+
+        // Updates (board Settings, bottom). The Improvement report section is parked and not shown.
+        Column(Modifier.padding(start = 8.dp)) {
+            SectionLabel("Updates", Modifier.padding(bottom = 8.dp))
+            val u = update
+            val title = when {
+                u.available != null -> "Version ${u.available} available"
+                u.checking -> "Checking for updates"
+                else -> "Up to date"
+            }
+            val sub = buildString {
+                append("Installed: ").append(u.installed)
+                val extra = when {
+                    u.available != null && u.notes != null -> u.notes
+                    u.checkedAt > 0 -> "Checked " + ago(u.checkedAt)
+                    else -> null
+                }
+                if (extra != null) append(" · ").append(extra)
+            }
+            Row(
+                Modifier.fillMaxWidth().height(52.dp).clickable(enabled = !u.checking && !u.downloading) { scope.launch { app.updates.check() } },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(title, style = MaterialTheme.typography.bodyLarge, color = motif.text)
+                    Text(sub, style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                }
+                if (u.available != null) {
+                    val shape = RoundedCornerShape(50)
+                    val label = if (u.downloading) "Downloading" else "Install"
+                    androidx.compose.foundation.layout.Box(
+                        Modifier.height(36.dp).clip(shape).border(1.dp, motif.accent.copy(alpha = if (u.downloading) 0.5f else 1f), shape)
+                            .clickable(enabled = !u.downloading) { app.updates.install() }.padding(horizontal = 18.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(label, style = MaterialTheme.typography.labelLarge, color = motif.accent.copy(alpha = if (u.downloading) 0.5f else 1f))
+                    }
+                }
+            }
+            u.line?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = motif.textMuted, modifier = Modifier.padding(top = 6.dp)) }
+        }
         Spacer(Modifier.height(8.dp))
     }
 
@@ -116,6 +159,18 @@ fun SettingsScreen(app: MotifApp, onBack: () -> Unit) {
             },
             onDismiss = { picking = null },
         )
+    }
+}
+
+/** "just now", "35 min ago", "3 hr ago", "2 days ago". */
+private fun ago(ms: Long): String {
+    val d = (System.currentTimeMillis() - ms).coerceAtLeast(0)
+    val min = d / 60_000
+    return when {
+        min < 1 -> "just now"
+        min < 60 -> "$min min ago"
+        min < 60 * 24 -> "${min / 60} hr ago"
+        else -> "${min / (60 * 24)} days ago"
     }
 }
 
