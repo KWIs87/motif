@@ -16,8 +16,14 @@ class TonePlayer {
     private var worker: Thread? = null
     @Volatile private var running = false
 
-    fun start() {
-        if (running) return
+    /** Why the last [start] failed, for the alarm log. */
+    @Volatile var lastError: String? = null
+        private set
+
+    /** Starts the tone; false when the AudioTrack could not be created or initialised (logged by the caller). */
+    fun start(): Boolean {
+        if (running) return true
+        lastError = null
         running = true
         val rate = 44_100
         val attrs = AudioAttributes.Builder()
@@ -30,9 +36,18 @@ class TonePlayer {
             .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
             .build()
         val minBuf = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        val t = AudioTrack(attrs, format, maxOf(minBuf, rate / 2), AudioTrack.MODE_STREAM, android.media.AudioManager.AUDIO_SESSION_ID_GENERATE)
+        val t = try {
+            AudioTrack(attrs, format, maxOf(minBuf, rate / 2), AudioTrack.MODE_STREAM, android.media.AudioManager.AUDIO_SESSION_ID_GENERATE)
+        } catch (e: Exception) {
+            lastError = "${e.javaClass.simpleName}: ${e.message}"; running = false; return false
+        }
+        if (t.state != AudioTrack.STATE_INITIALIZED) {
+            lastError = "state ${t.state}"; runCatching { t.release() }; running = false; return false
+        }
         track = t
-        t.play()
+        try { t.play() } catch (e: IllegalStateException) {
+            lastError = "play: ${e.message}"; runCatching { t.release() }; track = null; running = false; return false
+        }
         worker = thread(name = "motif-tone", isDaemon = true) {
             // Pattern: 660 Hz 300 ms, 880 Hz 300 ms, silence 900 ms. Short attack/release to avoid clicks.
             val pattern = listOf(660.0 to 0.3, 880.0 to 0.3, 0.0 to 0.9)
@@ -59,6 +74,7 @@ class TonePlayer {
                 }
             }
         }
+        return true
     }
 
     fun stop() {

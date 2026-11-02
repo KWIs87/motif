@@ -80,6 +80,7 @@ class RingingActivity : ComponentActivity() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val app = MotifApp.get(this)
+        AlarmLog.log(this, "ringing shown", intent?.getStringExtra(AlarmScheduler.EXTRA_ID)?.let { AlarmLog.idOf(it) } ?: "")
         setContent {
             val appearance by app.prefs.appearance.collectAsStateWithLifecycle(Appearance())
             val state by AlarmService.state.collectAsStateWithLifecycle()

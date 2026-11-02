@@ -6,16 +6,20 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.PowerManager
 import android.util.Log
 import com.kirkisham.motif.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
 import java.time.ZonedDateTime
 
 /**
  * Puts alarms into AlarmManager with setAlarmClock (exact, visible to the system as an alarm,
  * survives Doze). One PendingIntent per alarm id; snoozes reuse the id with a snooze flag.
+ * Every scheduling step is written to [AlarmLog] (0.12).
  */
 class AlarmScheduler(private val context: Context, private val store: AlarmStore) {
     private val am get() = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
@@ -32,33 +36,53 @@ class AlarmScheduler(private val context: Context, private val store: AlarmStore
     fun schedule(a: Alarm) {
         val pi = pending(a.id, snooze = false)
         val next = a.nextTrigger()
-        if (next == null) { am.cancel(pi); return }
-        setClock(next.toInstant().toEpochMilli(), pi)
-        Log.i(TAG, "Alarm ${a.id.take(6)} set for $next")
+        if (next == null) {
+            am.cancel(pi)
+            AlarmLog.log(context, "cancelled", "${AlarmLog.idOf(a.id)} (off or no next time)")
+            return
+        }
+        setClock(next.toInstant().toEpochMilli(), pi, a.id, "scheduled")
+    }
+
+    /**
+     * Test alarm (0.12): the given transient alarm is saved and set for [atMillis] through the same
+     * setAlarmClock path a real alarm takes, so the whole fire path is exercised.
+     */
+    suspend fun scheduleAt(a: Alarm, atMillis: Long) {
+        store.save(a)
+        setClock(atMillis, pending(a.id, snooze = false), a.id, "scheduled test")
     }
 
     fun cancel(id: String) {
         am.cancel(pending(id, snooze = false))
         am.cancel(pending(id, snooze = true))
+        AlarmLog.log(context, "cancelled", AlarmLog.idOf(id))
     }
 
     /** One-shot snooze for [minutes]; leaves the regular schedule alone. */
     fun snooze(id: String, minutes: Int) {
         val at = System.currentTimeMillis() + minutes * 60_000L
-        setClock(at, pending(id, snooze = true))
-        Log.i(TAG, "Alarm ${id.take(6)} snoozed $minutes min")
+        setClock(at, pending(id, snooze = true), id, "snoozed $minutes min")
     }
 
-    private fun setClock(atMillis: Long, pi: PendingIntent) {
+    private fun setClock(atMillis: Long, pi: PendingIntent, id: String, event: String) {
         val show = PendingIntent.getActivity(
             context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val whenText = Instant.ofEpochMilli(atMillis).atZone(ZoneId.systemDefault()).toLocalDateTime().withNano(0).toString().replace('T', ' ')
         try {
+            if (!canScheduleExact()) throw SecurityException("exact alarms not allowed")
             am.setAlarmClock(AlarmManager.AlarmClockInfo(atMillis, show), pi)
+            AlarmLog.log(context, event, "${AlarmLog.idOf(id)} for $whenText (exact)")
         } catch (e: SecurityException) {
             // Exact alarms denied: fall back to an inexact alarm so something still fires.
             Log.w(TAG, "Exact alarm not allowed; using inexact")
-            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, pi)
+            try {
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, pi)
+                AlarmLog.log(context, event, "${AlarmLog.idOf(id)} for $whenText (INEXACT: exact alarms not allowed)")
+            } catch (t: Throwable) {
+                AlarmLog.error(context, "setClock", t)
+            }
         }
     }
 
@@ -79,22 +103,71 @@ class AlarmScheduler(private val context: Context, private val store: AlarmStore
     }
 }
 
-/** Wakes the foreground service when an alarm fires, and reschedules after boot or time changes. */
+/**
+ * Wakes the foreground service when an alarm fires, and reschedules after boot or time changes.
+ * Not exported; our own PendingIntent names the component explicitly, which the system delivers
+ * regardless, and the system broadcasts in the manifest filter are exempt from the export rule.
+ */
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             AlarmScheduler.ACTION_FIRE, AlarmScheduler.ACTION_SNOOZE_FIRE -> {
-                val id = intent.getStringExtra(AlarmScheduler.EXTRA_ID) ?: return
-                AlarmService.start(context, id)
+                val id = intent.getStringExtra(AlarmScheduler.EXTRA_ID)
+                if (id == null) { AlarmLog.log(context, "receiver fired", "no alarm id in intent"); return }
+                val snooze = intent.action == AlarmScheduler.ACTION_SNOOZE_FIRE
+                AlarmLog.log(context, "receiver fired", AlarmLog.idOf(id) + if (snooze) " (snooze)" else "")
+                // Hold the CPU until the service has its own lock: the broadcast's wake lock ends when
+                // onReceive returns, and the service's onCreate runs after that.
+                holdCpu(context)
+                try {
+                    AlarmService.start(context, id)
+                    AlarmLog.log(context, "service start requested", AlarmLog.idOf(id))
+                } catch (t: Throwable) {
+                    // Android 12+: ForegroundServiceStartNotAllowedException when the start is treated as
+                    // background. Exact alarms are exempt, so this means the alarm went inexact or was denied.
+                    AlarmLog.error(context, "startForegroundService", t)
+                    releaseCpu()
+                }
             }
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED,
             "android.intent.action.QUICKBOOT_POWERON", AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED -> {
                 val result = goAsync()
+                AlarmLog.log(context, "reschedule", intent.action?.substringAfterLast('.') ?: "")
                 val store = AlarmStore(context)
                 CoroutineScope(Dispatchers.Default).launch {
-                    try { AlarmScheduler(context, store).rescheduleAll() } finally { result.finish() }
+                    try { AlarmScheduler(context, store).rescheduleAll() } catch (t: Throwable) { AlarmLog.error(context, "rescheduleAll", t) } finally { result.finish() }
                 }
             }
         }
+    }
+
+    companion object {
+        private var cpu: PowerManager.WakeLock? = null
+
+        /** Partial wake lock bridging receiver → service, 60 s at most; the service releases it once it has its own. */
+        @Synchronized fun holdCpu(context: Context) {
+            if (cpu?.isHeld == true) return
+            cpu = (context.getSystemService(Context.POWER_SERVICE) as PowerManager)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "motif:alarm-receiver").also { it.acquire(60_000L) }
+        }
+
+        @Synchronized fun releaseCpu() {
+            cpu?.let { if (it.isHeld) runCatching { it.release() } }
+            cpu = null
+        }
+    }
+}
+
+/** For the list: "Rings in 10 h 14 min" from a next trigger. */
+fun ringsInText(next: ZonedDateTime?, now: ZonedDateTime = ZonedDateTime.now()): String? {
+    if (next == null) return null
+    val d = java.time.Duration.between(now, next)
+    if (d.isNegative) return "Rings now"
+    val h = d.toHours(); val m = d.toMinutes() % 60
+    return when {
+        h >= 24 -> "Rings in ${h / 24} d ${h % 24} h"
+        h > 0 -> "Rings in $h h $m min"
+        m > 0 -> "Rings in $m min"
+        else -> "Rings in under a minute"
     }
 }

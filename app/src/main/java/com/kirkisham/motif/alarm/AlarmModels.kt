@@ -44,6 +44,8 @@ data class Alarm(
     val playForMinutes: Int? = 10,
     val snoozeMinutes: Int = 10,
     val enabled: Boolean = true,
+    /** True for the "Test alarm" one-shot (0.12): hidden from the list, deleted after it rings. */
+    val transient: Boolean = false,
 ) {
     val time: LocalTime get() = LocalTime.of(hour, minute)
     val totalMs: Long get() = songs.sumOf { it.durationMs }
@@ -53,9 +55,16 @@ data class Alarm(
         if (!enabled) return null
         val zone: ZoneId = now.zone
         if (oneTime) {
-            val d = date?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return null
-            val at = ZonedDateTime.of(LocalDateTime.of(d, time), zone)
-            return if (at.isAfter(now)) at else null
+            // The chosen date when it is still ahead; otherwise the next time the clock reads [time]
+            // (today if that is still to come, else tomorrow), so an alarm set earlier today rolls forward
+            // instead of silently never being scheduled (0.12).
+            val d = date?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            if (d != null) {
+                val at = ZonedDateTime.of(LocalDateTime.of(d, time), zone)
+                if (at.isAfter(now)) return at
+            }
+            val today = ZonedDateTime.of(LocalDateTime.of(now.toLocalDate(), time), zone)
+            return if (today.isAfter(now)) today else today.plusDays(1)
         }
         if (days.isEmpty()) return null
         for (i in 0..7) {
@@ -73,6 +82,15 @@ data class Alarm(
         val rep = if (oneTime) (date?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.let { "${it.month.name.take(3).lowercase().replaceFirstChar(Char::uppercase)} ${it.dayOfMonth}" } ?: "One time") else daysLabel(days)
         val n = if (songs.size == 1) "1 song" else "${songs.size} songs"
         return "$t · $rep · $n · fade ${fadeSeconds / 60}:${"%02d".format(fadeSeconds % 60)}"
+    }
+
+    /** "Mon–Fri", "Every day", "Once · Nov 3" for the list rows (0.12). */
+    fun repeatSummary(now: ZonedDateTime = ZonedDateTime.now()): String {
+        if (!oneTime) return daysLabel(days).replace(" to ", "\u2013")
+        val d = (if (enabled) nextTrigger(now) else null)?.toLocalDate()
+            ?: date?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            ?: return "Once"
+        return "Once · " + d.month.name.take(3).lowercase().replaceFirstChar(Char::uppercase) + " " + d.dayOfMonth
     }
 
     companion object {
