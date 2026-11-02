@@ -104,7 +104,7 @@ class AlarmService : Service() {
             this, 1, RingingActivity.intent(this, id), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val n = NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle("Alarm")
             .setContentText("Motif alarm is ringing")
             .setPriority(NotificationCompat.PRIORITY_MAX)
