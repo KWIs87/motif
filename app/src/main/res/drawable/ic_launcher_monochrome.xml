@@ -9,16 +9,16 @@
     <!-- Cabinet: 150x250, radius 24, 14-unit off-white stroke -->
     <path android:strokeColor="#FFFFFF" android:strokeWidth="14" android:fillColor="#00000000"
         android:pathData="M-51,-125 H51 A24,24 0 0 1 75,-101 V101 A24,24 0 0 1 51,125 H-51 A24,24 0 0 1 -75,101 V-101 A24,24 0 0 1 -51,-125 Z"/>
-    <!-- Drivers: rings r 40 / 26 / 13 (stroke 5) with gold cores r 13 / 8 / 4 -->
+    <!-- Drivers (0.12, sub at the bottom): tweeter r 13 at y -88, mid r 26 at y -30, sub r 44 at y +58 (stroke 5), gold cores r 4 / 8 / 14 -->
     <path android:strokeColor="#FFFFFF" android:strokeWidth="5" android:fillColor="#00000000"
-        android:pathData="M-40,-58 a40,40 0 1 0 80,0 a40,40 0 1 0 -80,0 Z"/>
-    <path android:fillColor="#FFFFFF" android:pathData="M-13,-58 a13,13 0 1 0 26,0 a13,13 0 1 0 -26,0 Z"/>
+        android:pathData="M-13,-88 a13,13 0 1 0 26,0 a13,13 0 1 0 -26,0 Z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M-4,-88 a4,4 0 1 0 8,0 a4,4 0 1 0 -8,0 Z"/>
     <path android:strokeColor="#FFFFFF" android:strokeWidth="5" android:fillColor="#00000000"
-        android:pathData="M-26,30 a26,26 0 1 0 52,0 a26,26 0 1 0 -52,0 Z"/>
-    <path android:fillColor="#FFFFFF" android:pathData="M-8,30 a8,8 0 1 0 16,0 a8,8 0 1 0 -16,0 Z"/>
+        android:pathData="M-26,-30 a26,26 0 1 0 52,0 a26,26 0 1 0 -52,0 Z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M-8,-30 a8,8 0 1 0 16,0 a8,8 0 1 0 -16,0 Z"/>
     <path android:strokeColor="#FFFFFF" android:strokeWidth="5" android:fillColor="#00000000"
-        android:pathData="M-13,88 a13,13 0 1 0 26,0 a13,13 0 1 0 -26,0 Z"/>
-    <path android:fillColor="#FFFFFF" android:pathData="M-4,88 a4,4 0 1 0 8,0 a4,4 0 1 0 -8,0 Z"/>
+        android:pathData="M-44,58 a44,44 0 1 0 88,0 a44,44 0 1 0 -88,0 Z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M-14,58 a14,14 0 1 0 28,0 a14,14 0 1 0 -28,0 Z"/>
     <!-- Rails: gold, stroke 4, round caps, x = ±118, y = ±100 -->
     <path android:strokeColor="#FFFFFF" android:strokeWidth="4" android:strokeLineCap="round" android:fillColor="#00000000"
         android:pathData="M-118,-100 V100"/>
