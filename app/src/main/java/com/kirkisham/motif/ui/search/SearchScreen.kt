@@ -1,7 +1,5 @@
 package com.kirkisham.motif.ui.search
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,13 +15,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,12 +28,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -54,6 +44,7 @@ import com.kirkisham.motif.ui.components.Cover
 import com.kirkisham.motif.ui.components.IconButton44
 import com.kirkisham.motif.ui.components.ListRow
 import com.kirkisham.motif.ui.components.MiniPlayer
+import com.kirkisham.motif.ui.components.PillSearchBox
 import com.kirkisham.motif.ui.components.PlainLine
 import com.kirkisham.motif.ui.components.SectionLabel
 import com.kirkisham.motif.ui.components.SongMenuSheet
@@ -76,6 +67,7 @@ fun SearchScreen(
     onBack: () -> Unit,
     onOpenPlaylist: (String) -> Unit,
     onOpenArtist: (SpArtist) -> Unit,
+    onOpenAlbum: (String) -> Unit,
     onOpenNowPlaying: () -> Unit,
     onPlus: (() -> Unit)?,
 ) {
@@ -157,7 +149,7 @@ fun SearchScreen(
     }
 
     menuTrack?.let { t ->
-        SongMenuSheet(app, t, onAddTo = { addTarget = it }, onGoToArtist = onOpenArtist, onDismiss = { menuTrack = null })
+        SongMenuSheet(app, t, onAddTo = { addTarget = it }, onGoToArtist = onOpenArtist, onGoToAlbum = onOpenAlbum, onDismiss = { menuTrack = null })
     }
     AddToHost(app, addTarget, null, onDismiss = { addTarget = null }, onDone = { line = it })
 }
@@ -252,28 +244,6 @@ private fun LazyListScope.results(
     }
 }
 
-/** 46 dp pill text field in the board's style, with a clear glyph while it has text. */
 @Composable
-private fun SearchBox(value: String, onChange: (String) -> Unit, onSubmit: () -> Unit, onClear: () -> Unit, modifier: Modifier) {
-    val shape = RoundedCornerShape(23.dp)
-    Row(
-        modifier.height(46.dp).clip(shape).background(motif.surface).border(1.dp, motif.chipLine, shape).padding(start = 18.dp, end = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.weight(1f)) {
-            if (value.isEmpty()) Text("Search songs, artists, podcasts", style = MaterialTheme.typography.bodyLarge, color = motif.textDim, maxLines = 1)
-            BasicTextField(
-                value = value,
-                onValueChange = onChange,
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyLarge.copy(color = motif.text),
-                cursorBrush = SolidColor(motif.accent),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        if (value.isNotEmpty()) IconButton44(Icons.Outlined.Close, "Clear", onClear, tint = motif.textMuted, size = 18.dp)
-        else Spacer(Modifier.height(44.dp))
-    }
-}
+private fun SearchBox(value: String, onChange: (String) -> Unit, onSubmit: () -> Unit, onClear: () -> Unit, modifier: Modifier) =
+    PillSearchBox(value, onChange, "Search songs, artists, podcasts", modifier, onSubmit = onSubmit, onClear = onClear)

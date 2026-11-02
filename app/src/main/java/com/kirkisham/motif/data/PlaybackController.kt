@@ -35,6 +35,13 @@ class PlaybackController(
         report(remote.play(p.uri))
     }
 
+    /** Plays any context URI (album, playlist, show) from its start, with shuffle on or off. */
+    fun playContext(uri: String, shuffle: Boolean = false) = scope.launch {
+        if (!ensure()) return@launch
+        remote.setShuffle(shuffle)
+        report(remote.play(uri))
+    }
+
     /**
      * Plays [contextUri] starting at the song [itemUri] (exact, by URI). [index] is Spotify's own position,
      * used only as the fallback when the Web API has no active device to talk to.

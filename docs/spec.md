@@ -2,7 +2,7 @@
 
 Owner: Kirk Isham. Personal use, one Spotify Premium account, Android only.
 Wireframes (source of truth for layout): https://claude.ai/artifact/9Ub5hBHd5zAiG92wTZwdSu
-Last revised: 2026-11-01.
+Last revised: 2026-11-01 (0.9).
 
 ## 1. Architecture
 
@@ -63,8 +63,11 @@ Every playlist, pinned first. Sort by Recent, Name, Song count. Same long press 
 - Sort chips: Name, Artist, Length, Custom, BPM (BPM chip hidden until Build 2).
 - Custom is the user's own order: long press a song, drag; dropping switches the chip to Custom and writes the order back to Spotify.
 - Swipe right on a song: add to playlist (same sheet as the plus button).
-- Long press a song: Play next, Add to playlist, Go to artist, Remove from this playlist.
+- Long press a song: Play next, Add to playlist, Go to artist, Go to album (0.9), Remove from this playlist.
 - 3-dot menu: Mass edit (Build 2), Rename, Delete.
+
+### 3.5a Album (0.9)
+Not on the wireframe canvas; the owner asked for it explicitly ("when you go to an artist it should also show their albums, EPs, other releases, and all other music with other artists they were a part of"), so it is in scope. Reached from the discography rows on Song and artist info and from "Go to album" in the song menu. The Playlist screen's look without sort chips or drag: header with cover, title, artists (tap opens the artist), year, type (Album / EP / Single / Compilation), song count and length, Play and Shuffle; rows are the songs in album order. Tap plays the song inside the album, long press opens the song menu, swipe right or plus adds to a playlist. Mini player at the bottom.
 
 ### 3.6 Now playing (song)
 - Art fills the top. Tap art → Song and artist info (Build 2; no-op in Build 1).
@@ -99,7 +102,7 @@ Appearance section only (see design rules). The rest of the Settings board is Bu
 ## 4. Build 2 and later (not now)
 
 - Search screen (box + results). Needed by Alarm's plus button in Build 1 only as a picker; the full screen is Build 2.
-- Song and artist info: credits (Genius, Discogs), songs like this (Last.fm → Spotify match), artist facts (Wikidata, MusicBrainz), "Lately" paragraph written by Claude weekly, concerts near you (Ticketmaster). Hide empty sections.
+- Song and artist info: credits (Genius, Discogs), songs like this (Last.fm → Spotify match), artist facts (Wikidata, MusicBrainz), "Lately" paragraph written by Claude weekly, concerts near you (Ticketmaster). Hide empty sections. Since 0.9 also the artist's discography from Spotify as rows of covers: Albums, Singles & EPs, Compilations, Appears on (each opens the Album screen, §3.5a).
 - Mass edit on playlists: checkboxes, drag handles, bulk remove.
 - BPM sort (GetSongBPM) once the key arrives.
 - Claude sheet: in-app chat with Spotify tools over the user's library.
@@ -183,3 +186,13 @@ Choices made while building where the boards or the text left room. Append; do n
 - Response shapes: `SpPlaylist.items` (total) replaces `tracks`; `itemCount` is null when Spotify did not include the field and `hasItems` says whether it did. Playlist rows are `SpPlaylistItem.item` (track or episode, `type` tells which); the old `track` key is still read as a fallback. `fields=` filters use the new names. Artist `genres` is absent for Dev Mode apps and is treated as empty (Last.fm tags already come first). `GET /me` no longer returns `product`; nothing used it.
 - Owned-only limitation: Spotify returns playlist contents only for playlists the user owns or collaborates on. Followed playlists (Spotify's own, other people's) appear on Home and All playlists with no song count, sort last under "Songs", and when opened show one muted line, "Spotify only shares the contents of playlists you own or collaborate on", in place of the list (also in the alarm song picker's browse view). Play and Shuffle still work through App Remote, which plays the playlist URI itself.
 - `DELETE /me/library` body shape could not be verified against the reference page (fetch blocked in the build session). The migration guide shows `{"uris": [...]}` in the body for `PUT /me/library`; a third-party client (spotantic) sends `uris` as a comma-separated query parameter for PUT, DELETE and contains, 40 at most. Motif sends the body form first and, if Spotify rejects it, retries with `?uris=`; it logs only which form was accepted (`MotifApi` tag). Check logcat after the first delete and remove the losing branch.
+
+### 0.9 (Artist discography, Album screen)
+- Discography: one `GET /artists/{id}/albums?include_groups=album,single,compilation,appears_on&limit=50&market=from_token`, following `next` up to 200 releases, grouped by `album_group` into Albums, Singles & EPs, Compilations and Appears on (features, soundtracks, other artists' releases that credit the artist). Newest first by `release_date`; regional duplicates (same name and year) collapse to one. Rows of 120 dp covers, title under the cover, year muted; empty groups hide. Cached 24 h in Info like the other lookups. If Spotify answers 403/404 under Development Mode the section hides and the status is logged once under `MotifApi`.
+- In artist mode (header ARTIST) the discography comes after every other section. In song mode the primary artist's discography sits right under the Artist section, so the owner does not have to tap through. The owner asked for an artist's own releases; "Appears on" covers everything else Spotify credits them on.
+- Album screen (§3.5a): `GET /albums/{id}?market=from_token` for the header and `GET /albums/{id}/tracks?limit=50&market=from_token` paginated for the rows, in parallel. Album tracks come back without an `album` field, so the album object is attached to each row (cover, song menu, add sheet all work the same). Tapping a row calls `PlaybackController.playInContext(albumUri, index, null, trackUri)`, URI-first via `PUT /me/player/play` with `offset.uri`, falling back to App Remote. Play and Shuffle use the new `playContext(uri, shuffle)`. The explicit flag is ignored. The song row moved from PlaylistScreen into `ui/components/Common.kt` (`SongRow`) with an optional long press so Album and Playlist share it.
+- Type label: Spotify files EPs under `album_type=single`; its own rule is one to three songs for a single and four to six for an EP, so a `single` with four or more songs reads "EP". `SpAlbum` gained `id`, `album_type`, `album_group`, `artists`, `total_tracks`; the playlist `fields=` filter now asks for `album(id,...,release_date)` so "Go to album" works from playlist rows (the id also falls back to the album URI).
+- Song menu: "Go to album" under "Go to artist" when the track has an album id; the Album screen does not show it (it is already there).
+- Widget (owner's Samsung): the launcher's grid cells are smaller than the 70 dp assumption, so a 4x2 came out wider than four cells. The provider now declares minWidth 180 dp, minHeight 90 dp, minResizeWidth 110 dp, minResizeHeight 60 dp, maxResizeWidth 320 dp, maxResizeHeight 200 dp (targetCellWidth 4 / targetCellHeight 2 unchanged). The layout fits 180x90: 8/12 dp padding, 40 dp art, 44 dp buttons in three equal cells so they spread with the width, text ellipsizes. From the size the launcher reports (OPTION_APPWIDGET_MIN_WIDTH/HEIGHT) the provider hides the art and the artist line under 110 dp of height and previous/next under 150 dp of width.
+- Add-to-playlist sheet (owner's screenshot): a filter box at the top in the Search pill style ("Find a playlist", no autofocus, case-insensitive name filter); one continuous list sorted by when Motif last added to each playlist (new `added_to_at` map in Prefs, playlist id → epoch ms, seeded from the old 3-item "recent_added" list), the never-added rest in Spotify's order after them; the old "3 recent then All playlists" split is gone. Every text in the sheet sets the Motif text color explicitly and the sheet provides LocalContentColor, so no Material default (the teal/mint seen on the Samsung) can leak in; the title gets status-bar padding so it is fully visible when the sheet is expanded. The teal could not be reproduced in the build session, so the fix is defensive; check the sheet on the phone.
+

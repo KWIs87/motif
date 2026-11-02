@@ -18,10 +18,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -51,6 +53,8 @@ import com.kirkisham.motif.MotifApp
 import com.kirkisham.motif.data.ArtistFacts
 import com.kirkisham.motif.data.Concert
 import com.kirkisham.motif.data.Credit
+import com.kirkisham.motif.data.Discography
+import com.kirkisham.motif.data.SpAlbum
 import com.kirkisham.motif.data.SpArtist
 import com.kirkisham.motif.data.SpTrack
 import com.kirkisham.motif.data.Where
@@ -74,8 +78,9 @@ enum class InfoKind { TRACK, ARTIST }
 /**
  * Song and artist info (board SongInfo): header, Credits (Genius or Discogs) with Last.fm tags,
  * Songs like this (Last.fm matched to Spotify), Artist (MusicBrainz, Wikidata, Wikipedia),
- * Near you (Ticketmaster, needs a key and coarse location). Every section hides until it has
- * data; lookups run in parallel and fail silently. "Lately" is parked.
+ * Near you (Ticketmaster, needs a key and coarse location), and the artist's discography from
+ * Spotify (albums, singles and EPs, compilations, appears on) as rows of covers. Every section
+ * hides until it has data; lookups run in parallel and fail silently. "Lately" is parked.
  */
 @Composable
 fun InfoScreen(
@@ -84,6 +89,7 @@ fun InfoScreen(
     id: String,
     onBack: () -> Unit,
     onSearch: (String) -> Unit,
+    onOpenAlbum: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -100,6 +106,7 @@ fun InfoScreen(
     var similar by remember { mutableStateOf<List<SpTrack>>(emptyList()) }
     var facts by remember { mutableStateOf<ArtistFacts?>(null) }
     var concerts by remember { mutableStateOf<List<Concert>?>(null) }
+    var discography by remember { mutableStateOf<Discography?>(null) }
     var hasLocation by remember { mutableStateOf(Where.hasPermission(context)) }
     var addTarget by remember { mutableStateOf<AddTarget?>(null) }
     var line by remember { mutableStateOf<String?>(null) }
@@ -135,6 +142,7 @@ fun InfoScreen(
     LaunchedEffect(artist?.id, artist?.name) {
         val a = artist ?: return@LaunchedEffect
         launch { facts = app.info.facts(a) }
+        a.id?.let { id -> launch { discography = app.info.discography(id) } }
         if (kind == InfoKind.ARTIST) launch { similar = app.info.similarForArtist(a) }
     }
     LaunchedEffect(artist?.name, hasLocation) {
@@ -228,6 +236,10 @@ fun InfoScreen(
         val f = facts
         val a = artist
         if (f != null && a != null) artistSection(a, f, onOpenUrl = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) })
+        // Song mode: the primary artist's releases sit right under the Artist section, so there is no
+        // need to tap through. Artist mode: they come after every other section (below).
+        val d = discography
+        if (kind == InfoKind.TRACK && d != null) discographySection(d, onOpenAlbum)
 
         if (needLocationLine) {
             item {
@@ -257,9 +269,38 @@ fun InfoScreen(
                 }
             }
         }
+        if (kind == InfoKind.ARTIST && d != null) discographySection(d, onOpenAlbum)
     }
 
     AddToHost(app, addTarget, null, onDismiss = { addTarget = null }, onDone = { line = it })
+}
+
+/** One horizontal row of 120 dp covers per non-empty group: title under the cover, year muted. */
+private fun LazyListScope.discographySection(d: Discography, onOpenAlbum: (String) -> Unit) {
+    d.groups.forEach { (label, releases) ->
+        item(key = "d-" + label) {
+            Column(Modifier.padding(top = 28.dp)) {
+                SectionLabel(label, Modifier.padding(start = 8.dp, bottom = 12.dp))
+                LazyRow(contentPadding = PaddingValues(start = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(releases, key = { it.albumId ?: it.name.orEmpty() }) { r -> ReleaseCard(r, onOpenAlbum) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReleaseCard(r: SpAlbum, onOpenAlbum: (String) -> Unit) {
+    val id = r.albumId
+    Column(
+        Modifier.width(120.dp).clickable(enabled = id != null) { id?.let(onOpenAlbum) },
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Cover(r.smallCoverUrl ?: r.coverUrl, 120.dp, radius = 4.dp)
+        Spacer(Modifier.height(2.dp))
+        Text(r.name.orEmpty(), style = MaterialTheme.typography.bodySmall, color = motif.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        r.year?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1) }
+    }
 }
 
 private fun LazyListScope.artistSection(a: SpArtist, f: ArtistFacts, onOpenUrl: (String) -> Unit) {

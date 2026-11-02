@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,12 +20,14 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,16 +89,24 @@ fun MenuSheet(title: String, items: List<MenuItem>, onDismiss: () -> Unit, subti
     }
 }
 
-/** "Add 'song' to" sheet: the 3 playlists most recently added to, then the rest (board Menus, short press plus). */
+/**
+ * "Add 'song' to" sheet (board Menus, short press plus): a filter box, then every playlist, the
+ * ones most recently added to from Motif first. Colors are set explicitly on every element so the
+ * sheet's own window cannot fall back to Material defaults; the title clears the status bar.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddToPlaylistSheet(
     songTitle: String,
-    recent: List<SpPlaylist>,
-    others: List<SpPlaylist>,
+    playlists: List<SpPlaylist>,
     onPick: (SpPlaylist) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var filter by remember { mutableStateOf("") }
+    val shown = remember(playlists, filter) {
+        val q = filter.trim()
+        if (q.isEmpty()) playlists else playlists.filter { it.name.contains(q, ignoreCase = true) }
+    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = motif.card,
@@ -103,21 +114,33 @@ fun AddToPlaylistSheet(
         dragHandle = null,
         shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp),
     ) {
-        androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().padding(vertical = 8.dp).navigationBarsPadding()) {
-            item {
-                Text(
-                    "Add “$songTitle” to",
-                    style = MaterialTheme.typography.bodyMedium, color = motif.textMuted,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-                Hairline(Modifier.padding(horizontal = 20.dp))
+        CompositionLocalProvider(LocalContentColor provides motif.text) {
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().statusBarsPadding().padding(vertical = 8.dp).navigationBarsPadding()) {
+                item {
+                    Text(
+                        "Add \u201c$songTitle\u201d to",
+                        style = MaterialTheme.typography.bodyMedium, color = motif.textMuted,
+                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 10.dp), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    PillSearchBox(
+                        value = filter,
+                        onChange = { filter = it },
+                        placeholder = "Find a playlist",
+                        imeAction = ImeAction.Done,
+                        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 10.dp),
+                    )
+                    Hairline(Modifier.padding(horizontal = 20.dp))
+                }
+                if (shown.isEmpty()) item {
+                    Text(
+                        if (playlists.isEmpty()) "No playlists yet" else "No playlist matches",
+                        style = MaterialTheme.typography.bodySmall, color = motif.textMuted,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                    )
+                }
+                items(shown.size, key = { shown[it].id }) { i -> PlaylistPickRow(shown[i]) { onPick(shown[i]); onDismiss() } }
+                item { Spacer(Modifier.height(8.dp)) }
             }
-            items(recent.size) { i -> PlaylistPickRow(recent[i]) { onPick(recent[i]); onDismiss() } }
-            if (recent.isNotEmpty() && others.isNotEmpty()) item {
-                SectionLabel("All playlists", Modifier.padding(start = 20.dp, top = 14.dp, bottom = 6.dp))
-            }
-            items(others.size) { i -> PlaylistPickRow(others[i]) { onPick(others[i]); onDismiss() } }
-            item { Spacer(Modifier.height(8.dp)) }
         }
     }
 }

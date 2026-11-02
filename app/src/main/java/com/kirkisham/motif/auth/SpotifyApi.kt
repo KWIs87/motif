@@ -1,6 +1,7 @@
 package com.kirkisham.motif.auth
 
 import android.util.Log
+import com.kirkisham.motif.data.SpAlbum
 import com.kirkisham.motif.data.SpArtist
 import com.kirkisham.motif.data.SpCurrentlyPlaying
 import com.kirkisham.motif.data.SpEpisode
@@ -68,7 +69,7 @@ class SpotifyApi(private val auth: SpotifyAuth) {
      */
     suspend fun playlistTracks(id: String): List<SpPlaylistItem>? {
         val fields = URLEncoder.encode(
-            "items(added_at,item(id,name,uri,type,is_local,duration_ms,artists(name,uri,id),album(name,uri,images))),next,total,offset",
+            "items(added_at,item(id,name,uri,type,is_local,duration_ms,artists(name,uri,id),album(id,name,uri,images,release_date))),next,total,offset",
             "UTF-8",
         )
         return pageAll("$BASE/playlists/$id/items?limit=100&additional_types=track,episode&fields=$fields")
@@ -133,6 +134,23 @@ class SpotifyApi(private val auth: SpotifyAuth) {
     suspend fun track(id: String): SpTrack? = get("$BASE/tracks/$id")
 
     suspend fun artist(id: String): SpArtist? = get("$BASE/artists/$id")
+
+    // ---- Albums ----
+
+    /**
+     * Every release that credits the artist: own albums, singles and EPs, compilations, and other
+     * artists' releases they appear on (`album_group` says which). Pages of 50 up to [ARTIST_ALBUMS_MAX];
+     * market=from_token keeps it to what the account can play. Null when the first page fails (the
+     * status is logged once by [get]; under Development Mode this may be 403 or 404).
+     */
+    suspend fun artistAlbums(id: String): List<SpAlbum>? =
+        pageAll("$BASE/artists/$id/albums?include_groups=album,single,compilation,appears_on&limit=50&market=from_token", ARTIST_ALBUMS_MAX)
+
+    /** One album with its artists, cover, release date and track count. */
+    suspend fun album(id: String): SpAlbum? = get("$BASE/albums/$id?market=from_token")
+
+    /** The album's songs in album order (simplified tracks: no `album` field, so callers attach it). */
+    suspend fun albumTracks(id: String): List<SpTrack>? = pageAll("$BASE/albums/$id/tracks?limit=50&market=from_token")
 
     // ---- Playlist edits ----
 
@@ -201,16 +219,17 @@ class SpotifyApi(private val auth: SpotifyAuth) {
 
     // ---- Plumbing ----
 
-    private suspend inline fun <reified T> pageAll(firstUrl: String): List<T>? {
+    /** Follows `next` until the list ends or [max] items are in hand. */
+    private suspend inline fun <reified T> pageAll(firstUrl: String, max: Int = Int.MAX_VALUE): List<T>? {
         val out = ArrayList<T>()
         var url: String? = firstUrl
         var guard = 0
-        while (url != null && guard++ < 100) {
+        while (url != null && guard++ < 100 && out.size < max) {
             val page = get<SpPage<T>>(url) ?: return if (out.isEmpty()) null else out
             out += page.items
             url = page.next
         }
-        return out
+        return if (out.size > max) out.take(max) else out
     }
 
     private suspend inline fun <reified T> get(url: String): T? = withContext(Dispatchers.IO) {
@@ -285,5 +304,7 @@ class SpotifyApi(private val auth: SpotifyAuth) {
         const val SEARCH_MAX = 10
         /** URIs per /me/library request. */
         private const val LIBRARY_MAX = 40
+        /** Releases fetched per artist for the discography (four pages of 50). */
+        private const val ARTIST_ALBUMS_MAX = 200
     }
 }

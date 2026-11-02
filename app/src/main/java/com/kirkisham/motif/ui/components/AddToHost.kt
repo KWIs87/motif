@@ -13,8 +13,9 @@ data class AddTarget(val uris: List<String>, val title: String) {
 }
 
 /**
- * The plus button's two sheets (board Menus): short press lists the 3 playlists most recently
- * added to, then all others; long press asks for a new playlist name and adds the track to it.
+ * The plus button's two sheets (board Menus): short press lists every playlist, the ones most
+ * recently added to from Motif first and the rest in Spotify's order, with a filter box on top;
+ * long press asks for a new playlist name and adds the track to it.
  */
 @Composable
 fun AddToHost(
@@ -25,18 +26,16 @@ fun AddToHost(
     onDone: (String) -> Unit = {},
 ) {
     val playlists by app.library.playlists.collectAsStateWithLifecycle()
-    val recentIds by app.prefs.recentAddedTo.collectAsStateWithLifecycle(emptyList())
+    val addedAt by app.prefs.addedToAt.collectAsStateWithLifecycle(emptyMap())
     val scope = rememberCoroutineScope()
 
     if (target != null) {
         val all = playlists.orEmpty()
-        val byId = all.associateBy { it.id }
-        val recent = recentIds.mapNotNull { byId[it] }.take(3)
-        val recentSet = recent.map { it.id }.toSet()
+        // Stable sort: recency descending, never-added playlists keep Spotify's order after them.
+        val ordered = all.sortedByDescending { addedAt[it.id] ?: 0L }
         AddToPlaylistSheet(
             songTitle = target.title,
-            recent = recent,
-            others = all.filterNot { it.id in recentSet },
+            playlists = ordered,
             onPick = { p ->
                 scope.launch {
                     val ok = app.library.addTracks(p.id, target.uris)

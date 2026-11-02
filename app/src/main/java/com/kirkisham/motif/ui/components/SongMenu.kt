@@ -1,6 +1,7 @@
 package com.kirkisham.motif.ui.components
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Album
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PlaylistAdd
@@ -12,9 +13,11 @@ import com.kirkisham.motif.data.SpArtist
 import com.kirkisham.motif.data.SpTrack
 
 /**
- * Long-press menu on a song (spec §3.5): Play next, Add to playlist, Go to artist, and, when the
- * caller passes [onRemove], Remove from this playlist. Shared by Playlist and Search.
+ * Long-press menu on a song (spec §3.5): Play next, Add to playlist, Go to artist, Go to album, and,
+ * when the caller passes [onRemove], Remove from this playlist. Shared by Playlist, Search and Album.
  * Go to artist opens the first credited artist; it is hidden for local files without an artist id.
+ * Go to album shows when the track carries an album id and the caller passes [onGoToAlbum]
+ * (the Album screen passes null, since it is already there).
  */
 @Composable
 fun SongMenuSheet(
@@ -24,12 +27,15 @@ fun SongMenuSheet(
     onGoToArtist: (SpArtist) -> Unit,
     onDismiss: () -> Unit,
     onRemove: (() -> Unit)? = null,
+    onGoToAlbum: ((String) -> Unit)? = null,
 ) {
     val artist = track.artists.firstOrNull { it.id != null }
+    val albumId = track.album?.albumId
     val items = buildList {
         add(MenuItem("Play next", Icons.Outlined.QueueMusic) { app.player.queue(track.uri) })
         add(MenuItem("Add to playlist", Icons.Outlined.PlaylistAdd) { onAddTo(AddTarget(track.uri, track.name)) })
         if (artist != null) add(MenuItem("Go to artist", Icons.Outlined.Person) { onGoToArtist(artist) })
+        if (albumId != null && onGoToAlbum != null) add(MenuItem("Go to album", Icons.Outlined.Album) { onGoToAlbum(albumId) })
         if (onRemove != null) add(MenuItem("Remove from this playlist", Icons.Outlined.Delete, Color(0xFFC96E6E)) { onRemove() })
     }
     MenuSheet(title = track.name, subtitle = track.artistNames, items = items, onDismiss = onDismiss)

@@ -63,7 +63,8 @@ class Prefs(private val context: Context) {
     private object K {
         val pins = stringPreferencesKey("pins")                  // JSON list of playlist ids, in pin order
         val lastPlayed = stringPreferencesKey("last_played")     // JSON map playlist id -> epoch ms
-        val recentAddedTo = stringPreferencesKey("recent_added") // JSON list of playlist ids, newest first
+        val recentAddedTo = stringPreferencesKey("recent_added") // JSON list of playlist ids, newest first (pre-0.9)
+        val addedToAt = stringPreferencesKey("added_to_at")      // JSON map playlist id -> epoch ms of the last add from Motif
         val lastEpisode = stringPreferencesKey("last_episode")
         val podcastSpeeds = stringPreferencesKey("podcast_speeds") // JSON map show uri -> speed
         val appearance = stringPreferencesKey("appearance")
@@ -78,7 +79,15 @@ class Prefs(private val context: Context) {
 
     val pins: Flow<List<String>> = store.data.map { decodeList(it[K.pins]) }
     val lastPlayed: Flow<Map<String, Long>> = store.data.map { decodeMap(it[K.lastPlayed]) }
-    val recentAddedTo: Flow<List<String>> = store.data.map { decodeList(it[K.recentAddedTo]) }
+    /**
+     * When each playlist last received a song from Motif. Seeded from the pre-0.9 "recent_added" list
+     * (newest first, one millisecond apart) when the map is still empty, so the order carries over.
+     */
+    val addedToAt: Flow<Map<String, Long>> = store.data.map { p ->
+        val map = decodeMap(p[K.addedToAt])
+        if (map.isNotEmpty()) map
+        else decodeList(p[K.recentAddedTo]).withIndex().associate { (i, id) -> id to (1_000_000L - i) }
+    }
     val lastEpisode: Flow<LastEpisode?> = store.data.map { p -> p[K.lastEpisode]?.let { runCatching { json.decodeFromString<LastEpisode>(it) }.getOrNull() } }
     val podcastSpeeds: Flow<Map<String, Float>> = store.data.map { p -> p[K.podcastSpeeds]?.let { runCatching { json.decodeFromString<Map<String, Float>>(it) }.getOrNull() } ?: emptyMap() }
     val appearance: Flow<Appearance> = store.data.map { p -> p[K.appearance]?.let { runCatching { json.decodeFromString<Appearance>(it) }.getOrNull() } ?: Appearance() }
@@ -105,15 +114,20 @@ class Prefs(private val context: Context) {
     }
 
     suspend fun markAddedTo(playlistId: String) = store.edit { p ->
-        val cur = decodeList(p[K.recentAddedTo]).toMutableList()
-        cur.remove(playlistId)
-        cur.add(0, playlistId)
-        p[K.recentAddedTo] = json.encodeToString(cur.take(10))
+        val cur = decodeMap(p[K.addedToAt]).toMutableMap()
+        if (cur.isEmpty()) {
+            // First write since 0.9: carry the old list over so earlier targets keep their order.
+            decodeList(p[K.recentAddedTo]).withIndex().forEach { (i, id) -> cur[id] = 1_000_000L - i }
+        }
+        cur[playlistId] = System.currentTimeMillis()
+        val trimmed = cur.entries.sortedByDescending { it.value }.take(500).associate { it.key to it.value }
+        p[K.addedToAt] = json.encodeToString(trimmed)
     }
 
     suspend fun forgetPlaylist(playlistId: String) = store.edit { p ->
         p[K.pins] = json.encodeToString(decodeList(p[K.pins]) - playlistId)
         p[K.recentAddedTo] = json.encodeToString(decodeList(p[K.recentAddedTo]) - playlistId)
+        p[K.addedToAt] = json.encodeToString(decodeMap(p[K.addedToAt]) - playlistId)
         p[K.lastPlayed] = json.encodeToString(decodeMap(p[K.lastPlayed]) - playlistId)
     }
 

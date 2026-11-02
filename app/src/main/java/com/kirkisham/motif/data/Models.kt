@@ -55,14 +55,39 @@ data class SpArtist(
     val smallImageUrl: String? get() = images?.minByOrNull { it.width ?: Int.MAX_VALUE }?.url ?: imageUrl
 }
 
+/**
+ * Album, as embedded in a track, listed by GET /artists/{id}/albums (simplified, carries
+ * `album_group`) or returned whole by GET /albums/{id} (adds `total_tracks`, `artists`).
+ */
 @Serializable
 data class SpAlbum(
+    val id: String? = null,
     val name: String? = null,
     val uri: String? = null,
     val images: List<SpImage>? = null,
     val release_date: String? = null,
+    /** "album", "single" or "compilation". */
+    val album_type: String? = null,
+    /** Only on /artists/{id}/albums rows: "album", "single", "compilation" or "appears_on". */
+    val album_group: String? = null,
+    val artists: List<SpArtist> = emptyList(),
+    val total_tracks: Int? = null,
 ) {
     val year: String? get() = release_date?.take(4)?.takeIf { it.length == 4 && it.all(Char::isDigit) }
+    /** Spotify id, read from the URI when the object came without one (old playlist rows). */
+    val albumId: String? get() = id ?: uri?.takeIf { it.startsWith("spotify:album:") }?.substringAfterLast(':')
+    val coverUrl: String? get() = images?.firstOrNull()?.url
+    val smallCoverUrl: String? get() = images?.minByOrNull { it.width ?: Int.MAX_VALUE }?.url ?: coverUrl
+    val artistNames: String get() = artists.joinToString(", ") { it.name }
+    /**
+     * "Album", "EP", "Single" or "Compilation". Spotify files EPs under `single`; its own rule is that a
+     * single has one to three songs and an EP four to six, so a `single` with four or more songs reads EP.
+     */
+    val kindLabel: String get() = when (album_type) {
+        "single" -> if ((total_tracks ?: 0) >= 4) "EP" else "Single"
+        "compilation" -> "Compilation"
+        else -> "Album"
+    }
 }
 
 @Serializable

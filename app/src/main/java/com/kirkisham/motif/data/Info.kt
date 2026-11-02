@@ -39,6 +39,20 @@ data class ArtistFacts(
 
 data class Concert(val venue: String, val city: String, val date: String, val url: String?)
 
+/** An artist's releases grouped by Spotify's `album_group`, newest first; empty groups are hidden. */
+data class Discography(
+    val albums: List<SpAlbum> = emptyList(),
+    val singles: List<SpAlbum> = emptyList(),
+    val compilations: List<SpAlbum> = emptyList(),
+    val appearsOn: List<SpAlbum> = emptyList(),
+) {
+    val isEmpty: Boolean get() = albums.isEmpty() && singles.isEmpty() && compilations.isEmpty() && appearsOn.isEmpty()
+    /** Label and rows for each non-empty group, in display order. */
+    val groups: List<Pair<String, List<SpAlbum>>> get() = listOf(
+        "Albums" to albums, "Singles & EPs" to singles, "Compilations" to compilations, "Appears on" to appearsOn,
+    ).filter { it.second.isNotEmpty() }
+}
+
 /** Everything the Song and artist info screen shows. */
 data class SongInfo(
     val credits: List<Credit> = emptyList(),
@@ -145,6 +159,25 @@ class Info(private val api: SpotifyApi) {
             wikipediaUrl = summary?.second,
         )
         if (facts.origin == null && facts.active == null && facts.members == null && facts.genres.isEmpty() && facts.bio == null) null else facts
+    }
+
+    /**
+     * Every release crediting the artist (GET /artists/{id}/albums, up to 200), grouped by
+     * `album_group`, newest first, regional duplicates (same name and year) collapsed. Null when
+     * Spotify refused or failed, so the section hides; the status is logged once under MotifApi.
+     */
+    suspend fun discography(artistId: String): Discography? = cached("discography:$artistId") {
+        val all = api.artistAlbums(artistId) ?: return@cached null
+        fun group(key: String) = all
+            .filter { (it.album_group ?: it.album_type) == key && !it.name.isNullOrBlank() && it.albumId != null }
+            .sortedByDescending { it.release_date ?: "" }
+            .distinctBy { it.name!!.trim().lowercase() + "|" + (it.year ?: "") }
+        Discography(
+            albums = group("album"),
+            singles = group("single"),
+            compilations = group("compilation"),
+            appearsOn = group("appears_on"),
+        ).takeIf { !it.isEmpty }
     }
 
     /** Null when the Ticketmaster key is missing or the lookup failed; empty when nothing is near. */

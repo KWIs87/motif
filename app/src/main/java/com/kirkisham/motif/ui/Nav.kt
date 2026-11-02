@@ -17,6 +17,7 @@ import com.kirkisham.motif.data.LastEpisode
 import com.kirkisham.motif.ui.components.AddTarget
 import com.kirkisham.motif.ui.components.AddToHost
 import com.kirkisham.motif.ui.alarm.AlarmScreen
+import com.kirkisham.motif.ui.album.AlbumScreen
 import com.kirkisham.motif.ui.home.HomeScreen
 import com.kirkisham.motif.ui.info.InfoKind
 import com.kirkisham.motif.ui.info.InfoScreen
@@ -40,11 +41,13 @@ object Routes {
     const val SEARCH = "search?q={q}"
     const val MASS_EDIT = "massedit/{id}"
     const val INFO = "info/{kind}/{id}"
+    const val ALBUM = "album/{id}"
     fun playlist(id: String) = "playlist/$id"
     fun search(query: String = "") = "search?q=" + Uri.encode(query)
     fun massEdit(id: String) = "massedit/$id"
     fun infoTrack(id: String) = "info/track/$id"
     fun infoArtist(id: String) = "info/artist/$id"
+    fun album(id: String) = "album/$id"
 }
 
 @Composable
@@ -89,8 +92,20 @@ fun MotifNavHost(
                 onBack = { nav.popBackStack() },
                 onOpenPlaylist = { nav.navigate(Routes.playlist(it)) },
                 onOpenArtist = { a -> a.id?.let { nav.navigate(Routes.infoArtist(it)) } },
+                onOpenAlbum = { nav.navigate(Routes.album(it)) },
                 onOpenNowPlaying = { nav.navigate(Routes.NOW) },
                 onPlus = onPlus,
+            )
+        }
+        composable(Routes.ALBUM) { entry ->
+            val id = entry.arguments?.getString("id") ?: return@composable
+            AlbumScreen(
+                app = app,
+                albumId = id,
+                onBack = { nav.popBackStack() },
+                onOpenNowPlaying = { nav.navigate(Routes.NOW) },
+                onPlus = onPlus,
+                onOpenArtist = { a -> a.id?.let { nav.navigate(Routes.infoArtist(it)) } },
             )
         }
         composable(Routes.MASS_EDIT) { entry ->
@@ -100,7 +115,12 @@ fun MotifNavHost(
         composable(Routes.INFO) { entry ->
             val id = entry.arguments?.getString("id") ?: return@composable
             val kind = if (entry.arguments?.getString("kind") == "artist") InfoKind.ARTIST else InfoKind.TRACK
-            InfoScreen(app, kind, id, onBack = { nav.popBackStack() }, onSearch = { nav.navigate(Routes.search(it)) })
+            InfoScreen(
+                app, kind, id,
+                onBack = { nav.popBackStack() },
+                onSearch = { nav.navigate(Routes.search(it)) },
+                onOpenAlbum = { nav.navigate(Routes.album(it)) },
+            )
         }
         composable(Routes.ALL) {
             AllPlaylistsScreen(
@@ -122,6 +142,7 @@ fun MotifNavHost(
                 onDeleted = { nav.popBackStack() },
                 onMassEdit = { nav.navigate(Routes.massEdit(id)) },
                 onOpenArtist = { a -> a.id?.let { nav.navigate(Routes.infoArtist(it)) } },
+                onOpenAlbum = { nav.navigate(Routes.album(it)) },
             )
         }
         composable(Routes.NOW) {

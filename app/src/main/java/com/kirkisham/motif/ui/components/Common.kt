@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,21 +16,33 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -247,3 +260,88 @@ fun pluralSongs(n: Int) = if (n == 1) "1 song" else "$n songs"
 /** Shown in place of a song list when Spotify withholds a playlist's contents (February 2026 Dev Mode rule). */
 const val NOT_SHARED_LINE = "Spotify only shares the contents of playlists you own or collaborate on"
 
+
+/**
+ * 60 dp song row shared by Playlist and Album: 40 dp cover, title (accent when playing),
+ * "Artist · 3:42", plus. Swipe right calls [onSwipeRight]; [onLongClick] is optional because
+ * Playlist handles its long press through the drag gesture instead.
+ */
+@Composable
+fun SongRow(
+    track: com.kirkisham.motif.data.SpTrack,
+    playing: Boolean,
+    modifier: Modifier,
+    onClick: () -> Unit,
+    onSwipeRight: () -> Unit,
+    onPlus: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+) {
+    val density = LocalDensity.current
+    val threshold = with(density) { 72.dp.toPx() }
+    var dx by remember { mutableFloatStateOf(0f) }
+    Column(modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(60.dp)
+                .then(
+                    if (onLongClick != null) Modifier.combinedClickableCompat(true, onClick, onLongClick)
+                    else Modifier.clickable(onClick = onClick),
+                )
+                .pointerInput(track.uri) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { dx = 0f },
+                        onHorizontalDrag = { _, d -> dx += d },
+                        onDragEnd = { if (dx > threshold) onSwipeRight() },
+                    )
+                },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Cover(track.smallCoverUrl, 40.dp, radius = 3.dp)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(track.name, style = MaterialTheme.typography.labelLarge, color = if (playing) motif.accent else motif.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    "${track.artistNames} · ${formatClock(track.duration_ms)}",
+                    style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton44(Icons.Outlined.Add, "Add to playlist", onPlus, tint = motif.textMuted, size = 18.dp)
+        }
+        Hairline()
+    }
+}
+
+/** 46 dp pill text field in the board's style (Search, playlist filter), with a clear glyph while it has text. */
+@Composable
+fun PillSearchBox(
+    value: String,
+    onChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    onSubmit: () -> Unit = {},
+    onClear: () -> Unit = { onChange("") },
+    imeAction: ImeAction = ImeAction.Search,
+) {
+    val shape = RoundedCornerShape(23.dp)
+    Row(
+        modifier.height(46.dp).clip(shape).background(motif.surface).border(1.dp, motif.chipLine, shape).padding(start = 18.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.weight(1f)) {
+            if (value.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge, color = motif.textDim, maxLines = 1)
+            BasicTextField(
+                value = value,
+                onValueChange = onChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = motif.text),
+                cursorBrush = SolidColor(motif.accent),
+                keyboardOptions = KeyboardOptions(imeAction = imeAction),
+                keyboardActions = KeyboardActions(onSearch = { onSubmit() }, onDone = { onSubmit() }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (value.isNotEmpty()) IconButton44(Icons.Outlined.Close, "Clear", onClear, tint = motif.textMuted, size = 18.dp)
+        else Spacer(Modifier.height(44.dp))
+    }
+}

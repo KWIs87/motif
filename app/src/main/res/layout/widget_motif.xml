@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Widget 4x2 (board Widget): card, art, title, artist, previous / play-pause / next. Nothing else. -->
+<!-- Widget 4x2 (board Widget): card, art, title, artist, previous / play-pause / next. Nothing else.
+     Sized to fit 180x90 dp (Samsung's smaller grid cells): the provider hides the art and the artist
+     line below about 110 dp of height and previous/next below about 150 dp of width. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
@@ -25,10 +27,10 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp"
-        android:paddingTop="12dp"
-        android:paddingBottom="10dp">
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp">
 
         <LinearLayout
             android:id="@+id/widget_text_row"
@@ -40,8 +42,9 @@
 
             <ImageView
                 android:id="@+id/widget_art"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="12dp"
                 android:background="@drawable/widget_art_bg"
                 android:scaleType="centerCrop"
                 android:contentDescription="Widget settings" />
@@ -51,7 +54,6 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:layout_marginStart="12dp"
                 android:orientation="vertical">
 
                 <TextView
@@ -70,7 +72,7 @@
                     android:id="@+id/widget_artist"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
+                    android:layout_marginTop="1dp"
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:alpha="0.6"
@@ -80,56 +82,77 @@
             </LinearLayout>
         </LinearLayout>
 
+        <!-- Three equal cells so the buttons spread with the width and still fit at 180 dp. -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:gravity="center"
+            android:layout_height="44dp"
+            android:layout_marginTop="4dp"
             android:orientation="horizontal">
 
-            <ImageButton
-                android:id="@+id/widget_prev"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="@android:color/transparent"
-                android:contentDescription="Previous"
-                android:padding="12dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_prev" />
-
             <FrameLayout
-                android:layout_width="52dp"
-                android:layout_height="52dp"
-                android:layout_marginStart="28dp"
-                android:layout_marginEnd="28dp">
-
-                <ImageView
-                    android:id="@+id/widget_play_bg"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:src="@drawable/widget_circle"
-                    android:importantForAccessibility="no" />
+                android:id="@+id/widget_prev_cell"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1">
 
                 <ImageButton
-                    android:id="@+id/widget_play"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
+                    android:id="@+id/widget_prev"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_gravity="center"
                     android:background="@android:color/transparent"
-                    android:contentDescription="Play or pause"
-                    android:padding="14dp"
+                    android:contentDescription="Previous"
+                    android:padding="11dp"
                     android:scaleType="fitCenter"
-                    android:src="@drawable/ic_play" />
+                    android:src="@drawable/ic_prev" />
             </FrameLayout>
 
-            <ImageButton
-                android:id="@+id/widget_next"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="@android:color/transparent"
-                android:contentDescription="Next"
-                android:padding="12dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_next" />
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1">
+
+                <FrameLayout
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_gravity="center">
+
+                    <ImageView
+                        android:id="@+id/widget_play_bg"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:src="@drawable/widget_circle"
+                        android:importantForAccessibility="no" />
+
+                    <ImageButton
+                        android:id="@+id/widget_play"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@android:color/transparent"
+                        android:contentDescription="Play or pause"
+                        android:padding="12dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_play" />
+                </FrameLayout>
+            </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/widget_next_cell"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1">
+
+                <ImageButton
+                    android:id="@+id/widget_next"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_gravity="center"
+                    android:background="@android:color/transparent"
+                    android:contentDescription="Next"
+                    android:padding="11dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_next" />
+            </FrameLayout>
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>

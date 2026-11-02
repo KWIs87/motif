@@ -3,7 +3,6 @@ package com.kirkisham.motif.ui.playlist
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,7 +21,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.MoreHoriz
@@ -70,8 +68,8 @@ import com.kirkisham.motif.ui.components.NOT_SHARED_LINE
 import com.kirkisham.motif.ui.components.PlainLine
 import com.kirkisham.motif.ui.components.SectionLabel
 import com.kirkisham.motif.ui.components.SongMenuSheet
+import com.kirkisham.motif.ui.components.SongRow
 import com.kirkisham.motif.ui.components.TopBar
-import com.kirkisham.motif.ui.components.formatClock
 import com.kirkisham.motif.ui.components.formatLength
 import com.kirkisham.motif.ui.components.pluralSongs
 import com.kirkisham.motif.ui.motif
@@ -96,6 +94,7 @@ fun PlaylistScreen(
     onDeleted: () -> Unit,
     onMassEdit: () -> Unit,
     onOpenArtist: (SpArtist) -> Unit,
+    onOpenAlbum: (String) -> Unit,
 ) {
     val playlists by app.library.playlists.collectAsStateWithLifecycle()
     val items by app.library.tracksFlow(playlistId).collectAsStateWithLifecycle()
@@ -272,6 +271,7 @@ fun PlaylistScreen(
             track = t,
             onAddTo = { addTarget = it },
             onGoToArtist = onOpenArtist,
+            onGoToAlbum = onOpenAlbum,
             onRemove = { scope.launch { if (!app.library.removeTrack(playlistId, t.uri)) line = "Spotify did not remove the song." } },
             onDismiss = { menuTrack = null },
         )
@@ -299,48 +299,5 @@ fun PlaylistScreen(
             onConfirm = { scope.launch { if (app.library.unfollow(playlist.id)) { app.prefs.forgetPlaylist(playlist.id); onDeleted() } else line = "Spotify did not delete it." } },
             onDismiss = { deleting = false },
         )
-    }
-}
-
-/** 60 dp song row: 40 dp cover, title (accent when playing), "Artist · 3:42", plus. */
-@Composable
-private fun SongRow(
-    track: SpTrack,
-    playing: Boolean,
-    modifier: Modifier,
-    onClick: () -> Unit,
-    onSwipeRight: () -> Unit,
-    onPlus: () -> Unit,
-) {
-    val density = LocalDensity.current
-    val threshold = with(density) { 72.dp.toPx() }
-    var dx by remember { mutableFloatStateOf(0f) }
-    Column(modifier.fillMaxWidth()) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .height(60.dp)
-                .clickable(onClick = onClick)
-                .pointerInput(track.uri) {
-                    detectHorizontalDragGestures(
-                        onDragStart = { dx = 0f },
-                        onHorizontalDrag = { _, d -> dx += d },
-                        onDragEnd = { if (dx > threshold) onSwipeRight() },
-                    )
-                },
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Cover(track.smallCoverUrl, 40.dp, radius = 3.dp)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(track.name, style = MaterialTheme.typography.labelLarge, color = if (playing) motif.accent else motif.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    "${track.artistNames} · ${formatClock(track.duration_ms)}",
-                    style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-            }
-            IconButton44(Icons.Outlined.Add, "Add to playlist", onPlus, tint = motif.textMuted, size = 18.dp)
-        }
-        Hairline()
     }
 }

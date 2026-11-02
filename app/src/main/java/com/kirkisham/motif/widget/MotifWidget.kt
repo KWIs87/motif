@@ -10,6 +10,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.util.Log
 import android.util.TypedValue
+import android.view.View
 import android.widget.RemoteViews
 import com.kirkisham.motif.MainActivity
 import com.kirkisham.motif.MotifApp
@@ -99,7 +100,13 @@ class MotifWidget : AppWidgetProvider() {
             val p = app.remote.playback.value
             val art = p?.imageUri?.let { runCatching { app.remote.loadArt(it, Image.Dimension.SMALL) }.getOrNull() }
             val manager = AppWidgetManager.getInstance(app)
-            for (id in ids) manager.updateAppWidget(id, build(app, style, p, art))
+            for (id in ids) {
+                // Portrait size the launcher gave this instance (0 when unknown, which shows everything).
+                val opts = manager.getAppWidgetOptions(id)
+                val w = opts?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0) ?: 0
+                val h = opts?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0) ?: 0
+                manager.updateAppWidget(id, build(app, style, p, art, w, h))
+            }
         }
 
         /** App settings when the switch is on (opacity still comes from the widget's own), else the widget's own. */
@@ -116,8 +123,16 @@ class MotifWidget : AppWidgetProvider() {
             )
         }
 
-        private fun build(context: Context, s: WidgetStyle, p: SpotifyRemote.Playback?, art: Bitmap?): RemoteViews {
+        private fun build(context: Context, s: WidgetStyle, p: SpotifyRemote.Playback?, art: Bitmap?, widthDp: Int = 0, heightDp: Int = 0): RemoteViews {
             val rv = RemoteViews(context.packageName, R.layout.widget_motif)
+            // Small cells (Samsung): below about 110 dp of height only the title fits above the buttons,
+            // and below about 150 dp of width only the play button fits on the row.
+            val short = heightDp in 1 until COMPACT_HEIGHT_DP
+            val narrow = widthDp in 1 until COMPACT_WIDTH_DP
+            rv.setViewVisibility(R.id.widget_art, if (short) View.GONE else View.VISIBLE)
+            rv.setViewVisibility(R.id.widget_artist, if (short) View.GONE else View.VISIBLE)
+            rv.setViewVisibility(R.id.widget_prev_cell, if (narrow) View.GONE else View.VISIBLE)
+            rv.setViewVisibility(R.id.widget_next_cell, if (narrow) View.GONE else View.VISIBLE)
             val text = s.textColor
             val bgAlpha = (255 * s.backgroundOpacity.coerceIn(0, 100) / 100f).roundToInt()
             rv.setInt(R.id.widget_bg, "setColorFilter", s.backgroundColor or 0xFF000000.toInt())
@@ -158,6 +173,9 @@ class MotifWidget : AppWidgetProvider() {
             rv.setOnClickPendingIntent(R.id.widget_art, PendingIntent.getActivity(context, 11, config, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             return rv
         }
+
+        private const val COMPACT_HEIGHT_DP = 110
+        private const val COMPACT_WIDTH_DP = 150
 
         private fun broadcast(context: Context, action: String): PendingIntent =
             PendingIntent.getBroadcast(context, action.hashCode(), Intent(context, MotifWidget::class.java).setAction(action), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
