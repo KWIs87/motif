@@ -71,7 +71,9 @@ private val RedLine = Color(0xFF5A3030)
 @Composable
 fun MassEditScreen(app: MotifApp, playlistId: String, onClose: () -> Unit) {
     val source by app.library.tracksFlow(playlistId).collectAsStateWithLifecycle()
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val playback by app.remote.playback.collectAsStateWithLifecycle()
+    // The shared ribbon sits under this screen's bar; lift the bar and the list above it while something plays.
+    val ribbon = if (playback != null) 80.dp else 0.dp
 
     var order by remember { mutableStateOf<List<SpPlaylistItem>?>(null) }
     val ops = remember { mutableListOf<Library.EditOp>() }
@@ -114,10 +116,19 @@ fun MassEditScreen(app: MotifApp, playlistId: String, onClose: () -> Unit) {
         val uris = rows.filterIndexed { i, it -> keyOf(i, it) in selected }.mapNotNull { it.item?.uri }.distinct()
         if (uris.isEmpty()) return
         val set = uris.toSet()
+        val before = rows
+        val beforeSelected = selected
+        val opsBefore = ops.size
         // Spotify removes by URI, so every copy of a selected song goes, selected or not.
         order = rows.filterNot { it.item?.uri in set }
         ops += Library.EditOp.Remove(uris)
         selected = emptySet()
+        // Undo (0.10): nothing has reached Spotify yet (that waits for Done), so undo is purely local.
+        app.undo.post(undo = {
+            if (ops.size > opsBefore && ops.last() is Library.EditOp.Remove) ops.removeAt(ops.lastIndex)
+            order = before
+            selected = beforeSelected
+        })
     }
 
     fun done() {
@@ -136,7 +147,7 @@ fun MassEditScreen(app: MotifApp, playlistId: String, onClose: () -> Unit) {
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.fillMaxSize().statusBarsPadding(),
-            contentPadding = PaddingValues(start = 16.dp, end = 24.dp, bottom = 110.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 24.dp, bottom = 120.dp + ribbon),
             userScrollEnabled = dragIndex < 0,
         ) {
             item {
@@ -215,7 +226,7 @@ fun MassEditScreen(app: MotifApp, playlistId: String, onClose: () -> Unit) {
             Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 16.dp)
+                .padding(start = 12.dp, end = 12.dp, top = 16.dp, bottom = 16.dp + ribbon)
                 .fillMaxWidth()
                 .height(64.dp)
                 .clip(RoundedCornerShape(10.dp))

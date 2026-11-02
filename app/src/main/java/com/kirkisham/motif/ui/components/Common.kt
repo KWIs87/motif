@@ -76,12 +76,16 @@ fun IconButton44(
     tint: Color = motif.text,
     size: Dp = 22.dp,
     enabled: Boolean = true,
+    onLongClick: (() -> Unit)? = null,
 ) {
     Box(
         modifier
             .size(44.dp)
             .clip(CircleShape)
-            .clickable(enabled = enabled, onClick = onClick),
+            .then(
+                if (onLongClick != null) Modifier.combinedClickableCompat(enabled, onClick, onLongClick)
+                else Modifier.clickable(enabled = enabled, onClick = onClick),
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription, tint = if (enabled) tint else tint.copy(alpha = 0.35f), modifier = Modifier.size(size))
@@ -117,8 +121,11 @@ fun Chip(
     onLongClick: (() -> Unit)? = null,
     enabled: Boolean = true,
     height: Dp = 30.dp,
+    /** Sort chips (0.10): true = ascending ▲, false = descending ▾, null = no glyph. Shown only while selected. */
+    ascending: Boolean? = null,
 ) {
     val shape = RoundedCornerShape(50)
+    val text = if (selected && ascending != null) label + (if (ascending) " \u25B2" else " \u25BE") else label
     val bg = if (selected) motif.text else Color.Transparent
     val fg = if (selected) motif.ground else motif.textMuted.copy(alpha = if (enabled) 1f else 0.5f)
     Box(
@@ -135,7 +142,7 @@ fun Chip(
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            label,
+            text,
             fontSize = 12.sp * motif.textScale,
             fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
             color = fg,
@@ -206,6 +213,7 @@ fun TrackRow(
     onLongClick: (() -> Unit)? = null,
     onPlus: (() -> Unit)? = null,
     plusTint: Color = motif.textMuted,
+    onPlusLong: (() -> Unit)? = null,
 ) {
     Row(
         modifier
@@ -226,7 +234,7 @@ fun TrackRow(
                 style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
-        if (onPlus != null) IconButton44(Icons.Outlined.Add, "Add to playlist", onPlus, tint = plusTint, size = 18.dp)
+        if (onPlus != null) IconButton44(Icons.Outlined.Add, "Add to playlist", onPlus, tint = plusTint, size = 18.dp, onLongClick = onPlusLong)
     }
 }
 
@@ -275,6 +283,7 @@ fun SongRow(
     onSwipeRight: () -> Unit,
     onPlus: () -> Unit,
     onLongClick: (() -> Unit)? = null,
+    onPlusLong: (() -> Unit)? = null,
 ) {
     val density = LocalDensity.current
     val threshold = with(density) { 72.dp.toPx() }
@@ -306,7 +315,7 @@ fun SongRow(
                     style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
-            IconButton44(Icons.Outlined.Add, "Add to playlist", onPlus, tint = motif.textMuted, size = 18.dp)
+            IconButton44(Icons.Outlined.Add, "Add to playlist", onPlus, tint = motif.textMuted, size = 18.dp, onLongClick = onPlusLong)
         }
         Hairline()
     }
@@ -344,4 +353,25 @@ fun PillSearchBox(
         if (value.isNotEmpty()) IconButton44(Icons.Outlined.Close, "Clear", onClear, tint = motif.textMuted, size = 18.dp)
         else Spacer(Modifier.height(44.dp))
     }
+}
+
+
+/**
+ * Name filter ranking (0.10, items 3 and 4): names starting with the typed text first, then names
+ * with any word starting with it, then names containing it anywhere; each group keeps the
+ * incoming order. Case-insensitive. A blank query returns the list unchanged.
+ */
+fun <T> rankByName(items: List<T>, query: String, name: (T) -> String): List<T> {
+    val q = query.trim().lowercase()
+    if (q.isEmpty()) return items
+    fun rank(n: String): Int {
+        val s = n.lowercase()
+        return when {
+            s.startsWith(q) -> 0
+            s.split(' ', '-', '/', '(', '[', '&', ',', '.').any { it.startsWith(q) } -> 1
+            s.contains(q) -> 2
+            else -> 3
+        }
+    }
+    return items.map { it to rank(name(it)) }.filter { it.second < 3 }.sortedBy { it.second }.map { it.first }
 }

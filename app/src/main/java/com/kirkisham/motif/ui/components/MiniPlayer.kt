@@ -1,14 +1,15 @@
 package com.kirkisham.motif.ui.components
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Speaker
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,15 +35,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kirkisham.motif.data.SpotifyRemote
 import com.kirkisham.motif.ui.motif
 
 /**
- * Bottom bar from the boards: 64 dp card, art, title, artist, plus, play/pause.
- * Swipe left anywhere on it to skip (spec §3.3). Hidden when Spotify has reported nothing yet.
+ * Now-playing ribbon (boards; 0.10 item 11): one shared 64 dp card at the bottom of every screen
+ * except Now playing. Left to right: art, "Song · Artist" on one line (marquee when long),
+ * speaker (Connect devices), plus (short press: add sheet; long press: new playlist), play/pause.
+ * Tap the text to open Now playing; swipe left anywhere on it to skip (spec §3.3).
+ * Hidden when Spotify has reported nothing yet.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MiniPlayer(
     remote: SpotifyRemote,
@@ -51,6 +56,8 @@ fun MiniPlayer(
     onOpen: () -> Unit,
     onPlus: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    onPlusLong: (() -> Unit)? = null,
+    onDevices: (() -> Unit)? = null,
 ) {
     if (playback == null) return
     val art = rememberArt(remote, playback.imageUri, com.spotify.protocol.types.Image.Dimension.SMALL)
@@ -59,6 +66,7 @@ fun MiniPlayer(
     var drag by remember { mutableStateOf(0f) }
     val shape = RoundedCornerShape(10.dp)
     val p = motif
+    val label = if (playback.artist.isBlank()) playback.title else "${playback.title} · ${playback.artist}"
     Row(
         modifier
             .fillMaxWidth()
@@ -67,7 +75,6 @@ fun MiniPlayer(
             .clip(shape)
             .background(p.card)
             .glowBorder(shape)
-            .clickable(onClick = onOpen)
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragStart = { drag = 0f },
@@ -77,14 +84,20 @@ fun MiniPlayer(
             }
             .padding(start = 10.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        ArtBox(art, 44.dp)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(playback.title, style = MaterialTheme.typography.labelLarge, color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(playback.artist, style = MaterialTheme.typography.bodySmall, color = p.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Box(Modifier.clickable(onClick = onOpen)) { ArtBox(art, 44.dp) }
+        Box(Modifier.weight(1f).height(64.dp).clickable(onClick = onOpen), contentAlignment = Alignment.CenterStart) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                color = p.text,
+                maxLines = 1,
+                modifier = Modifier.fillMaxWidth().basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1200),
+            )
         }
-        if (onPlus != null && !playback.isEpisode) IconButton44(Icons.Outlined.Add, "Add to playlist", onPlus)
+        if (onDevices != null) IconButton44(Icons.Outlined.Speaker, "Play on", onDevices, tint = p.textMuted, size = 20.dp)
+        if (onPlus != null && !playback.isEpisode) IconButton44(Icons.Outlined.Add, "Add to playlist", onPlus, onLongClick = onPlusLong)
         IconButton44(
             if (playback.isPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
             if (playback.isPaused) "Play" else "Pause",

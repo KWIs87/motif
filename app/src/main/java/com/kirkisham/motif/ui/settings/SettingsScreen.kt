@@ -46,6 +46,7 @@ import com.kirkisham.motif.ui.components.Chip
 import com.kirkisham.motif.ui.components.Hairline
 import com.kirkisham.motif.ui.components.SectionLabel
 import com.kirkisham.motif.ui.components.TopBar
+import com.kirkisham.motif.ui.MINI_PLAYER_SPACE
 import com.kirkisham.motif.ui.motif
 import kotlinx.coroutines.launch
 
@@ -61,8 +62,8 @@ fun SettingsScreen(app: MotifApp, onBack: () -> Unit) {
     fun save(a: Appearance) = scope.launch { app.prefs.setAppearance(a) }
 
     Column(
-        Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, end = 24.dp, bottom = 40.dp),
+        Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState())
+            .padding(start = 16.dp, end = 24.dp, bottom = MINI_PLAYER_SPACE),
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         TopBar("Settings", onBack)

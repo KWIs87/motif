@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kirkisham.motif.MotifApp
+import com.kirkisham.motif.ui.MINI_PLAYER_SPACE
 import com.kirkisham.motif.data.SpAlbum
 import com.kirkisham.motif.data.SpArtist
 import com.kirkisham.motif.data.SpTrack
@@ -43,7 +44,6 @@ import com.kirkisham.motif.ui.components.AddTarget
 import com.kirkisham.motif.ui.components.AddToHost
 import com.kirkisham.motif.ui.components.Cover
 import com.kirkisham.motif.ui.components.IconButton44
-import com.kirkisham.motif.ui.components.MiniPlayer
 import com.kirkisham.motif.ui.components.PlainLine
 import com.kirkisham.motif.ui.components.SongMenuSheet
 import com.kirkisham.motif.ui.components.SongRow
@@ -65,8 +65,6 @@ fun AlbumScreen(
     app: MotifApp,
     albumId: String,
     onBack: () -> Unit,
-    onOpenNowPlaying: () -> Unit,
-    onPlus: (() -> Unit)?,
     onOpenArtist: (SpArtist) -> Unit,
 ) {
     val playback by app.remote.playback.collectAsStateWithLifecycle()
@@ -75,6 +73,7 @@ fun AlbumScreen(
     var failed by remember { mutableStateOf(false) }
     var menuTrack by remember { mutableStateOf<SpTrack?>(null) }
     var addTarget by remember { mutableStateOf<AddTarget?>(null) }
+    var newPlaylistFor by remember { mutableStateOf<AddTarget?>(null) }
     var line by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(albumId) {
@@ -103,7 +102,7 @@ fun AlbumScreen(
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.fillMaxSize().statusBarsPadding(),
-            contentPadding = PaddingValues(start = 16.dp, end = 24.dp, bottom = 100.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 24.dp, bottom = MINI_PLAYER_SPACE),
         ) {
             item { TopBar(null, onBack) }
             item {
@@ -142,19 +141,11 @@ fun AlbumScreen(
                     onClick = { a?.uri?.let { app.player.playInContext(it, index, null, track.uri) } },
                     onSwipeRight = { addTarget = AddTarget(track.uri, track.name) },
                     onPlus = { addTarget = AddTarget(track.uri, track.name) },
+                    onPlusLong = { newPlaylistFor = AddTarget(track.uri, track.name) },
                     onLongClick = { menuTrack = track },
                 )
             }
         }
-        MiniPlayer(
-            remote = app.remote,
-            playback = playback,
-            onToggle = { app.player.togglePlayPause() },
-            onNext = { app.player.next() },
-            onOpen = onOpenNowPlaying,
-            onPlus = onPlus,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
-        )
     }
 
     menuTrack?.let { t ->
@@ -166,5 +157,5 @@ fun AlbumScreen(
             onDismiss = { menuTrack = null },
         )
     }
-    AddToHost(app, addTarget, null, onDismiss = { addTarget = null }, onDone = { line = it })
+    AddToHost(app, addTarget, newPlaylistFor, onDismiss = { addTarget = null; newPlaylistFor = null }, onDone = { line = it })
 }

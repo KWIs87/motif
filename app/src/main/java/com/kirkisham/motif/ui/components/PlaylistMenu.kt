@@ -51,12 +51,21 @@ fun PlaylistMenuHost(app: MotifApp, target: SpPlaylist?, onDismiss: () -> Unit, 
         ConfirmSheet(
             text = "Remove “${p.name}” from your library?",
             confirmLabel = "Delete",
-            onConfirm = {
-                scope.launch {
-                    if (app.library.unfollow(p.id)) { app.prefs.forgetPlaylist(p.id); onDeleted(p) }
-                }
-            },
+            onConfirm = { deletePlaylistWithUndo(app, p); onDeleted(p) },
             onDismiss = { deleting = null },
         )
     }
+}
+
+/**
+ * Delete with Undo (0.10, item 1): the playlist leaves the list at once; the unfollow call is held
+ * until the pill expires or is dismissed, so Undo simply cancels it and puts the row back.
+ */
+fun deletePlaylistWithUndo(app: MotifApp, p: SpPlaylist) {
+    val hidden = app.library.hidePlaylist(p.id)
+    app.undo.post(
+        label = "Deleted",
+        commit = { if (app.library.unfollowRemote(p)) app.prefs.forgetPlaylist(p.id) },
+        undo = { hidden?.let { app.library.restorePlaylist(it.first, it.second) } },
+    )
 }

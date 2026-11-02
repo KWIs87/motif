@@ -6,12 +6,14 @@ import com.kirkisham.motif.alarm.AlarmStore
 import com.kirkisham.motif.auth.SpotifyApi
 import com.kirkisham.motif.auth.SpotifyAuth
 import com.kirkisham.motif.auth.TokenStore
+import com.kirkisham.motif.data.Devices
 import com.kirkisham.motif.data.Info
 import com.kirkisham.motif.data.Library
 import com.kirkisham.motif.data.Lyrics
 import com.kirkisham.motif.data.PlaybackController
 import com.kirkisham.motif.data.Prefs
 import com.kirkisham.motif.data.SpotifyRemote
+import com.kirkisham.motif.data.UndoManager
 import com.kirkisham.motif.data.Updates
 import com.kirkisham.motif.widget.MotifWidget
 import kotlinx.coroutines.CoroutineScope
@@ -44,6 +46,10 @@ class MotifApp : Application() {
         private set
     lateinit var updates: Updates
         private set
+    lateinit var devices: Devices
+        private set
+    lateinit var undo: UndoManager
+        private set
     lateinit var alarmStore: AlarmStore
         private set
     lateinit var alarmScheduler: AlarmScheduler
@@ -63,6 +69,8 @@ class MotifApp : Application() {
         lyrics = Lyrics()
         info = Info(api)
         updates = Updates(this, prefs)
+        devices = Devices(api, this)
+        undo = UndoManager(appScope)
         alarmStore = AlarmStore(this)
         alarmScheduler = AlarmScheduler(this, alarmStore)
 

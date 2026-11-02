@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kirkisham.motif.MotifApp
+import com.kirkisham.motif.ui.MINI_PLAYER_SPACE
 import com.kirkisham.motif.data.SpArtist
 import com.kirkisham.motif.data.SpSearchResult
 import com.kirkisham.motif.data.SpTrack
@@ -43,7 +44,6 @@ import com.kirkisham.motif.ui.components.AddToHost
 import com.kirkisham.motif.ui.components.Cover
 import com.kirkisham.motif.ui.components.IconButton44
 import com.kirkisham.motif.ui.components.ListRow
-import com.kirkisham.motif.ui.components.MiniPlayer
 import com.kirkisham.motif.ui.components.PillSearchBox
 import com.kirkisham.motif.ui.components.PlainLine
 import com.kirkisham.motif.ui.components.SectionLabel
@@ -68,8 +68,6 @@ fun SearchScreen(
     onOpenPlaylist: (String) -> Unit,
     onOpenArtist: (SpArtist) -> Unit,
     onOpenAlbum: (String) -> Unit,
-    onOpenNowPlaying: () -> Unit,
-    onPlus: (() -> Unit)?,
 ) {
     val playback by app.remote.playback.collectAsStateWithLifecycle()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -79,6 +77,7 @@ fun SearchScreen(
     var failed by remember { mutableStateOf(false) }
     var menuTrack by remember { mutableStateOf<SpTrack?>(null) }
     var addTarget by remember { mutableStateOf<AddTarget?>(null) }
+    var newPlaylistFor by remember { mutableStateOf<AddTarget?>(null) }
     var line by remember { mutableStateOf<String?>(null) }
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -97,7 +96,7 @@ fun SearchScreen(
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.fillMaxSize().statusBarsPadding(),
-            contentPadding = PaddingValues(start = 12.dp, end = 24.dp, top = 4.dp, bottom = 100.dp),
+            contentPadding = PaddingValues(start = 12.dp, end = 24.dp, top = 4.dp, bottom = MINI_PLAYER_SPACE),
         ) {
             item {
                 Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -124,6 +123,7 @@ fun SearchScreen(
                     onPlayTrack = { app.player.playUri(it.uri) },
                     onTrackMenu = { menuTrack = it },
                     onPlusTrack = { addTarget = AddTarget(it.uri, it.name) },
+                    onPlusLongTrack = { newPlaylistFor = AddTarget(it.uri, it.name) },
                     onOpenArtist = onOpenArtist,
                     onOpenPlaylist = onOpenPlaylist,
                     onPlayShow = { show ->
@@ -137,21 +137,12 @@ fun SearchScreen(
             }
             line?.let { item { PlainLine(it, Modifier.padding(start = 12.dp)) } }
         }
-        MiniPlayer(
-            remote = app.remote,
-            playback = playback,
-            onToggle = { app.player.togglePlayPause() },
-            onNext = { app.player.next() },
-            onOpen = onOpenNowPlaying,
-            onPlus = onPlus,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
-        )
     }
 
     menuTrack?.let { t ->
         SongMenuSheet(app, t, onAddTo = { addTarget = it }, onGoToArtist = onOpenArtist, onGoToAlbum = onOpenAlbum, onDismiss = { menuTrack = null })
     }
-    AddToHost(app, addTarget, null, onDismiss = { addTarget = null }, onDone = { line = it })
+    AddToHost(app, addTarget, newPlaylistFor, onDismiss = { addTarget = null; newPlaylistFor = null }, onDone = { line = it })
 }
 
 private fun LazyListScope.results(
@@ -160,6 +151,7 @@ private fun LazyListScope.results(
     onPlayTrack: (SpTrack) -> Unit,
     onTrackMenu: (SpTrack) -> Unit,
     onPlusTrack: (SpTrack) -> Unit,
+    onPlusLongTrack: (SpTrack) -> Unit,
     onOpenArtist: (SpArtist) -> Unit,
     onOpenPlaylist: (String) -> Unit,
     onPlayShow: (com.kirkisham.motif.data.SpShow) -> Unit,
@@ -180,6 +172,7 @@ private fun LazyListScope.results(
                 onClick = { onPlayTrack(t) },
                 onLongClick = { onTrackMenu(t) },
                 onPlus = { onPlusTrack(t) },
+                onPlusLong = { onPlusLongTrack(t) },
                 modifier = Modifier.padding(start = 12.dp),
             )
         }

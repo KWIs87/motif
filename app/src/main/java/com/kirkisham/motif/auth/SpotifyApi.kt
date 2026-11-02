@@ -4,6 +4,8 @@ import android.util.Log
 import com.kirkisham.motif.data.SpAlbum
 import com.kirkisham.motif.data.SpArtist
 import com.kirkisham.motif.data.SpCurrentlyPlaying
+import com.kirkisham.motif.data.SpDevice
+import com.kirkisham.motif.data.SpDevices
 import com.kirkisham.motif.data.SpEpisode
 import com.kirkisham.motif.data.SpPage
 import com.kirkisham.motif.data.SpPlaylist
@@ -85,6 +87,18 @@ class SpotifyApi(private val auth: SpotifyAuth) {
 
     /** What Spotify is playing on any device right now, episodes included. Null when nothing is. */
     suspend fun currentlyPlaying(): SpCurrentlyPlaying? = get("$BASE/me/player?additional_types=episode")
+
+    // ---- Spotify Connect ----
+
+    /** Every device the account can play on right now (GET /me/player/devices). Null on failure. */
+    suspend fun devices(): List<SpDevice>? = get<SpDevices>("$BASE/me/player/devices")?.devices
+
+    /** Moves playback to [deviceId] and keeps playing (PUT /me/player with device_ids). */
+    suspend fun transferPlayback(deviceId: String, play: Boolean = true): Boolean =
+        sendOk("PUT", "$BASE/me/player", buildJsonObject {
+            put("device_ids", JsonArray(listOf(JsonPrimitive(deviceId))))
+            put("play", play)
+        })
 
     /** Songs only (alarm song picker). Pages of [SEARCH_MAX] with offset until [limit] is reached. */
     suspend fun searchTracks(query: String, limit: Int = 20): List<SpTrack>? {

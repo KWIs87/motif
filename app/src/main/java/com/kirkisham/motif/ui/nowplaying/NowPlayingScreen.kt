@@ -1,7 +1,15 @@
 package com.kirkisham.motif.ui.nowplaying
 
 import android.content.Intent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,6 +23,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -36,6 +45,7 @@ import androidx.compose.material.icons.outlined.IosShare
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Replay
+import androidx.compose.material.icons.outlined.Speaker
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -47,6 +57,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,7 +68,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -90,11 +103,16 @@ private val SPEEDS = listOf(1f, 1.25f, 1.5f, 2f)
  * current item: songs get previous/next, plus and Lyrics; episodes get 15 s skips, speed and sleep.
  */
 @Composable
-fun NowPlayingScreen(app: MotifApp, onBack: () -> Unit, onOpenInfo: (String) -> Unit) {
+fun NowPlayingScreen(app: MotifApp, onBack: () -> Unit, onOpenInfo: (String) -> Unit, onDevices: () -> Unit) {
     val playback by app.remote.playback.collectAsStateWithLifecycle()
     val contextTitle by app.remote.contextTitle.collectAsStateWithLifecycle()
     val notice by app.player.notice.collectAsStateWithLifecycle()
+    val devices by app.devices.devices.collectAsStateWithLifecycle()
     val p = playback
+
+    // Connect (0.10, item 5): know where playback is so the header can name a device that is not this phone.
+    LaunchedEffect(Unit) { while (true) { app.devices.refresh(); delay(15_000) } }
+    val elsewhere = remember(devices) { app.devices.activeElsewhere() }
 
     if (p == null) {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
@@ -124,20 +142,35 @@ fun NowPlayingScreen(app: MotifApp, onBack: () -> Unit, onOpenInfo: (String) -> 
         Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(start = 28.dp, end = 28.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
-        if (p.isEpisode) PodcastBody(app, p, positionMs, contextTitle, art, onBack, share)
-        else SongBody(app, p, positionMs, contextTitle, art, onBack, share, onOpenInfo = { onOpenInfo(p.uri.substringAfterLast(':')) })
+        val speaker: @Composable () -> Unit = { SpeakerAction(elsewhere?.name, onDevices) }
+        if (p.isEpisode) PodcastBody(app, p, positionMs, contextTitle, art, onBack, share, speaker)
+        else SongBody(app, p, positionMs, contextTitle, art, onBack, share, speaker, onOpenInfo = { onOpenInfo(p.uri.substringAfterLast(':')) })
         notice?.let { PlainLine(it) }
     }
 }
 
 @Composable
 private fun Header(contextLabel: String?, onBack: () -> Unit, actions: @Composable () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 0.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton44(Icons.Outlined.KeyboardArrowDown, "Back", onBack)
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             if (contextLabel != null) SectionLabel(contextLabel)
         }
-        Row { actions() }
+        Row(verticalAlignment = Alignment.CenterVertically) { actions() }
+    }
+}
+
+/** Speaker icon (Connect sheet); when playback is on another device its name sits under the icon in small muted text. */
+@Composable
+private fun SpeakerAction(elsewhereName: String?, onDevices: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton44(Icons.Outlined.Speaker, "Play on", onDevices, tint = if (elsewhereName != null) motif.accent else motif.textMuted, size = 20.dp)
+        if (elsewhereName != null) {
+            Text(
+                elsewhereName, fontSize = 9.sp, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.width(64.dp).padding(top = 0.dp), textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
@@ -191,6 +224,7 @@ private fun ColumnScope.SongBody(
     art: android.graphics.Bitmap?,
     onBack: () -> Unit,
     onShare: () -> Unit,
+    speaker: @Composable () -> Unit,
     onOpenInfo: () -> Unit,
 ) {
     var lyrics by remember { mutableStateOf<List<LyricLine>?>(null) }
@@ -207,18 +241,50 @@ private fun ColumnScope.SongBody(
 
     Header(contextTitle, onBack) {
         if (lyrics != null) IconButton44(Icons.Outlined.MusicNote, "Lyrics", { showLyrics = !showLyrics }, tint = if (showLyrics) motif.accent else motif.textMuted, size = 20.dp)
+        speaker()
         IconButton44(Icons.Outlined.IosShare, "Share", onShare, tint = motif.textMuted, size = 20.dp)
     }
 
     // Tap on the art opens Song and artist info (spec §3.6); while lyrics show, tapping does nothing.
+    // Swipe left = next, right = previous (0.10, item 12); the art slides out the way it was pushed.
+    val density = LocalDensity.current
+    val swipeThreshold = with(density) { 72.dp.toPx() }
+    var swipeDx by remember { mutableFloatStateOf(0f) }
+    var swipeDir by remember { mutableIntStateOf(0) } // +1 next, -1 previous, 0 none
     Box(
         Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(8.dp)).background(motif.card)
-            .clickable(enabled = !showLyrics && p.uri.startsWith("spotify:track:"), onClick = onOpenInfo),
+            .clickable(enabled = !showLyrics && p.uri.startsWith("spotify:track:"), onClick = onOpenInfo)
+            .pointerInput(p.canSkipNext, p.canSkipPrev) {
+                detectHorizontalDragGestures(
+                    onDragStart = { swipeDx = 0f },
+                    onHorizontalDrag = { _, dx -> swipeDx += dx },
+                    onDragEnd = {
+                        when {
+                            swipeDx < -swipeThreshold && p.canSkipNext -> { swipeDir = 1; app.player.next() }
+                            swipeDx > swipeThreshold && p.canSkipPrev -> { swipeDir = -1; app.player.previous() }
+                        }
+                    },
+                )
+            },
     ) {
-        val l = lyrics
-        if (showLyrics && l != null) LyricsView(l, positionMs, Modifier.fillMaxSize())
-        else if (art != null) Image(art.asImageBitmap(), null, Modifier.fillMaxSize())
+        AnimatedContent(
+            targetState = p.uri,
+            transitionSpec = {
+                val dir = swipeDir
+                if (dir == 0) fadeIn(tween(200)) togetherWith fadeOut(tween(200))
+                else (slideInHorizontally(tween(260)) { w -> dir * w } + fadeIn(tween(200))) togetherWith
+                    (slideOutHorizontally(tween(260)) { w -> -dir * w } + fadeOut(tween(200)))
+            },
+            label = "art",
+        ) { _ ->
+            Box(Modifier.fillMaxSize()) {
+                val l = lyrics
+                if (showLyrics && l != null) LyricsView(l, positionMs, Modifier.fillMaxSize())
+                else if (art != null) Image(art.asImageBitmap(), null, Modifier.fillMaxSize())
+            }
+        }
     }
+    LaunchedEffect(p.uri) { delay(400); swipeDir = 0 }
 
     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(p.title, style = MaterialTheme.typography.titleLarge, color = motif.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -292,6 +358,7 @@ private fun ColumnScope.PodcastBody(
     art: android.graphics.Bitmap?,
     onBack: () -> Unit,
     onShare: () -> Unit,
+    speaker: @Composable () -> Unit,
 ) {
     val speeds by app.prefs.podcastSpeeds.collectAsStateWithLifecycle(emptyMap())
     val sleepEndsAt by app.player.sleepEndsAt.collectAsStateWithLifecycle()
@@ -306,6 +373,7 @@ private fun ColumnScope.PodcastBody(
     LaunchedEffect(showUri) { if (showUri != null && savedSpeed != 1f) app.player.setPodcastSpeed(savedSpeed, null) }
 
     Header(contextTitle ?: p.album.takeIf { it.isNotBlank() }, onBack) {
+        speaker()
         IconButton44(Icons.Outlined.IosShare, "Share", onShare, tint = motif.textMuted, size = 20.dp)
     }
 

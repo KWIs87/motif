@@ -53,6 +53,8 @@ import com.kirkisham.motif.MotifApp
 import com.kirkisham.motif.data.ArtistFacts
 import com.kirkisham.motif.data.Concert
 import com.kirkisham.motif.data.Credit
+import com.kirkisham.motif.data.Credits
+import com.kirkisham.motif.ui.MINI_PLAYER_SPACE
 import com.kirkisham.motif.data.Discography
 import com.kirkisham.motif.data.SpAlbum
 import com.kirkisham.motif.data.SpArtist
@@ -88,7 +90,8 @@ fun InfoScreen(
     kind: InfoKind,
     id: String,
     onBack: () -> Unit,
-    onSearch: (String) -> Unit,
+    onOpenPerson: (Credit) -> Unit,
+    onOpenGenre: (String) -> Unit,
     onOpenAlbum: (String) -> Unit,
 ) {
     val context = LocalContext.current
@@ -101,7 +104,7 @@ fun InfoScreen(
     var track by remember { mutableStateOf<SpTrack?>(null) }
     var artist by remember { mutableStateOf<SpArtist?>(null) }
     var failed by remember { mutableStateOf(false) }
-    var credits by remember { mutableStateOf<List<Credit>>(emptyList()) }
+    var credits by remember { mutableStateOf<Credits?>(null) }
     var tags by remember { mutableStateOf<List<String>>(emptyList()) }
     var similar by remember { mutableStateOf<List<SpTrack>>(emptyList()) }
     var facts by remember { mutableStateOf<ArtistFacts?>(null) }
@@ -109,6 +112,7 @@ fun InfoScreen(
     var discography by remember { mutableStateOf<Discography?>(null) }
     var hasLocation by remember { mutableStateOf(Where.hasPermission(context)) }
     var addTarget by remember { mutableStateOf<AddTarget?>(null) }
+    var newPlaylistFor by remember { mutableStateOf<AddTarget?>(null) }
     var line by remember { mutableStateOf<String?>(null) }
 
     val askLocation = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -178,7 +182,7 @@ fun InfoScreen(
 
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding(),
-        contentPadding = PaddingValues(start = 16.dp, end = 24.dp, bottom = 40.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 24.dp, bottom = MINI_PLAYER_SPACE),
     ) {
         item {
             Row(Modifier.fillMaxWidth().height(60.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -194,24 +198,28 @@ fun InfoScreen(
             line?.let { PlainLine(it, Modifier.padding(start = 8.dp)) }
         }
 
-        if (credits.isNotEmpty() || tags.isNotEmpty()) {
+        val cr = credits
+        if ((cr != null && cr.rows.isNotEmpty()) || tags.isNotEmpty()) {
             item { SectionLabel("Credits", Modifier.padding(start = 8.dp, top = 16.dp, bottom = 8.dp)) }
-            items(credits, key = { "c-" + it.name + it.role }) { c ->
-                Column(Modifier.padding(start = 8.dp)) {
-                    Row(
-                        Modifier.fillMaxWidth().height(48.dp).clickable { onSearch(c.name) },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(c.name, style = MaterialTheme.typography.bodyMedium, color = motif.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(c.role, style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (cr != null) {
+                items(cr.rows, key = { "c-" + it.name.lowercase() }) { c ->
+                    Column(Modifier.padding(start = 8.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth().height(48.dp).clickable { onOpenPerson(c) },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(c.name, style = MaterialTheme.typography.bodyMedium, color = motif.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(c.role, style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = motif.textMuted, modifier = Modifier.size(16.dp))
                         }
-                        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = motif.textMuted, modifier = Modifier.size(16.dp))
+                        Hairline()
                     }
-                    Hairline()
                 }
+                item { Text("Credits: ${cr.source}", style = MaterialTheme.typography.bodySmall, color = motif.textDim, modifier = Modifier.padding(start = 8.dp, top = 6.dp)) }
             }
-            if (tags.isNotEmpty()) item { TagChips(tags) }
+            if (tags.isNotEmpty()) item { TagChips(tags, onOpenGenre) }
         }
 
         if (similar.isNotEmpty()) {
@@ -223,6 +231,7 @@ fun InfoScreen(
                         playing = playback?.uri == t.uri,
                         onClick = { app.player.playUri(t.uri) },
                         onPlus = { addSimilar(t) },
+                        onPlusLong = { newPlaylistFor = AddTarget(t.uri, t.name) },
                         plusTint = motif.text,
                     )
                     Hairline()
@@ -272,7 +281,7 @@ fun InfoScreen(
         if (kind == InfoKind.ARTIST && d != null) discographySection(d, onOpenAlbum)
     }
 
-    AddToHost(app, addTarget, null, onDismiss = { addTarget = null }, onDone = { line = it })
+    AddToHost(app, addTarget, newPlaylistFor, onDismiss = { addTarget = null; newPlaylistFor = null }, onDone = { line = it })
 }
 
 /** One horizontal row of 120 dp covers per non-empty group: title under the cover, year muted. */
@@ -339,13 +348,14 @@ private fun LazyListScope.artistSection(a: SpArtist, f: ArtistFacts, onOpenUrl: 
     }
 }
 
+/** Last.fm tag chips; same look as before, now tappable (0.10, item 10: Genre screen). */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TagChips(tags: List<String>) {
+fun TagChips(tags: List<String>, onOpen: (String) -> Unit) {
     FlowRow(Modifier.padding(start = 8.dp, top = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         tags.forEach { t ->
             Box(
-                Modifier.height(28.dp).clip(RoundedCornerShape(14.dp)).border(1.dp, motif.chipLine, RoundedCornerShape(14.dp)).padding(horizontal = 12.dp),
+                Modifier.height(28.dp).clip(RoundedCornerShape(14.dp)).border(1.dp, motif.chipLine, RoundedCornerShape(14.dp)).clickable { onOpen(t) }.padding(horizontal = 12.dp),
                 contentAlignment = Alignment.Center,
             ) { Text(t.replaceFirstChar { it.titlecase(Locale.getDefault()) }, style = MaterialTheme.typography.bodySmall, color = motif.textMuted) }
         }

@@ -86,6 +86,7 @@ import com.kirkisham.motif.ui.components.PillButton
 import com.kirkisham.motif.ui.components.PlainLine
 import com.kirkisham.motif.ui.components.SectionLabel
 import com.kirkisham.motif.ui.components.TopBar
+import com.kirkisham.motif.ui.MINI_PLAYER_SPACE
 import com.kirkisham.motif.ui.components.combinedClickableCompat
 import com.kirkisham.motif.ui.components.formatClock
 import com.kirkisham.motif.ui.motif
@@ -168,8 +169,8 @@ fun AlarmScreen(app: MotifApp, onBack: () -> Unit) {
     val next = remember(draft, now) { draft.copy(enabled = true).nextTrigger() }
 
     LazyColumn(
-        Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding(),
-        contentPadding = PaddingValues(start = 16.dp, end = 24.dp, bottom = 40.dp),
+        Modifier.fillMaxSize().statusBarsPadding(),
+        contentPadding = PaddingValues(start = 16.dp, end = 24.dp, bottom = MINI_PLAYER_SPACE),
         userScrollEnabled = dragIndex < 0,
         verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
@@ -293,7 +294,11 @@ fun AlarmScreen(app: MotifApp, onBack: () -> Unit) {
                             onDragCancel = { finishDrag() },
                         )
                     },
-                onRemove = { draft = draft.copy(songs = draft.songs.filterIndexed { j, _ -> j != i }) },
+                onRemove = {
+                    val before = draft.songs
+                    draft = draft.copy(songs = draft.songs.filterIndexed { j, _ -> j != i })
+                    app.undo.post(undo = { draft = draft.copy(songs = before) })
+                },
             )
         }
         item {
@@ -389,7 +394,14 @@ fun AlarmScreen(app: MotifApp, onBack: () -> Unit) {
     if (customMinutes) MinutesSheet(draft.playForMinutes, onPick = { draft = draft.copy(playForMinutes = it) }, onDismiss = { customMinutes = false })
     deleting?.let { a ->
         ConfirmSheet("Delete “${a.name.ifBlank { "Alarm" }}”?", "Delete",
-            onConfirm = { scope.launch { app.alarmScheduler.cancel(a.id); app.alarmStore.delete(a.id); if (draft.id == a.id) { draft = Alarm.blank(UUID.randomUUID().toString()); editingExisting = false } } },
+            onConfirm = {
+                scope.launch {
+                    app.alarmScheduler.cancel(a.id); app.alarmStore.delete(a.id)
+                    if (draft.id == a.id) { draft = Alarm.blank(UUID.randomUUID().toString()); editingExisting = false }
+                    // Undo (0.10): the alarm object is in hand, so undo saves and schedules it again.
+                    app.undo.post("Deleted", undo = { app.alarmStore.save(a); if (a.enabled) app.alarmScheduler.schedule(a) })
+                }
+            },
             onDismiss = { deleting = null })
     }
 }

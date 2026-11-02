@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kirkisham.motif.MotifApp
+import com.kirkisham.motif.ui.MINI_PLAYER_SPACE
 import com.kirkisham.motif.data.SpArtist
 import com.kirkisham.motif.data.SpPlaylist
 import com.kirkisham.motif.data.SpTrack
@@ -62,10 +63,10 @@ import com.kirkisham.motif.ui.components.Hairline
 import com.kirkisham.motif.ui.components.IconButton44
 import com.kirkisham.motif.ui.components.MenuItem
 import com.kirkisham.motif.ui.components.MenuSheet
-import com.kirkisham.motif.ui.components.MiniPlayer
 import com.kirkisham.motif.ui.components.NameSheet
 import com.kirkisham.motif.ui.components.NOT_SHARED_LINE
 import com.kirkisham.motif.ui.components.PlainLine
+import com.kirkisham.motif.ui.components.deletePlaylistWithUndo
 import com.kirkisham.motif.ui.components.SectionLabel
 import com.kirkisham.motif.ui.components.SongMenuSheet
 import com.kirkisham.motif.ui.components.SongRow
@@ -78,6 +79,8 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private val SORTS = listOf("Recent", "Name", "Artist", "Length", "Custom") // BPM chip hidden until Build 2 (spec §3.5)
+/** Natural direction per sort: Recent newest first, the rest A to Z / shortest first. Custom has none. */
+private fun naturalAscending(sort: String): Boolean? = when (sort) { "Custom" -> null; "Recent" -> false; else -> true }
 
 /**
  * Playlist (board Playlist): header, Play/Shuffle, sort chips, song rows.
@@ -89,8 +92,6 @@ fun PlaylistScreen(
     app: MotifApp,
     playlistId: String,
     onBack: () -> Unit,
-    onOpenNowPlaying: () -> Unit,
-    onPlus: (() -> Unit)?,
     onDeleted: () -> Unit,
     onMassEdit: () -> Unit,
     onOpenArtist: (SpArtist) -> Unit,
@@ -99,12 +100,15 @@ fun PlaylistScreen(
     val playlists by app.library.playlists.collectAsStateWithLifecycle()
     val items by app.library.tracksFlow(playlistId).collectAsStateWithLifecycle()
     val sorts by app.prefs.playlistSorts.collectAsStateWithLifecycle(emptyMap())
+    val reversedIds by app.prefs.playlistSortReversed.collectAsStateWithLifecycle(emptySet())
     val playback by app.remote.playback.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     // Playlists outside the library (opened from Search) are fetched once and kept for the session.
     var foreign by remember { mutableStateOf<SpPlaylist?>(null) }
     val playlist = playlists?.firstOrNull { it.id == playlistId } ?: foreign
     val sort = sorts[playlistId] ?: "Custom"
+    val reversed = playlistId in reversedIds
+    val ascending = naturalAscending(sort)?.let { it xor reversed }
 
     var menuTrack by remember { mutableStateOf<SpTrack?>(null) }
     var addTarget by remember { mutableStateOf<AddTarget?>(null) }
@@ -126,17 +130,18 @@ fun PlaylistScreen(
 
     // Display order: Spotify's own order under Custom, otherwise sorted. Each entry keeps its Spotify index.
     val source = items ?: emptyList()
-    val displayed = remember(source, sort) {
+    val displayed = remember(source, sort, reversed) {
         // Keep Spotify's index on every row (reorder/remove need it), but hide rows Spotify no longer returns
         // (removed catalog tracks, local files): they would render as a blank "0:00" line.
         val indexed = source.withIndex().filter { !it.value.item?.name.isNullOrBlank() }
-        when (sort) {
+        val natural = when (sort) {
             "Recent" -> indexed.sortedByDescending { it.value.added_at ?: "" }
             "Name" -> indexed.sortedBy { it.value.item?.name?.lowercase() ?: "" }
             "Artist" -> indexed.sortedWith(compareBy({ it.value.item?.artistNames?.lowercase() ?: "" }, { it.value.item?.name?.lowercase() ?: "" }))
             "Length" -> indexed.sortedBy { it.value.item?.duration_ms ?: 0L }
             else -> indexed
         }
+        if (reversed && sort != "Custom") natural.asReversed() else natural
     }
     val totalMs = source.sumOf { it.item?.duration_ms ?: 0L }
 
@@ -178,7 +183,7 @@ fun PlaylistScreen(
         LazyColumn(
             Modifier.fillMaxSize().statusBarsPadding(),
             state = rememberLazyListState(),
-            contentPadding = PaddingValues(start = 16.dp, end = 24.dp, bottom = 100.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 24.dp, bottom = MINI_PLAYER_SPACE),
             userScrollEnabled = dragIndex < 0,
         ) {
             item {
@@ -209,7 +214,7 @@ fun PlaylistScreen(
                 Spacer(Modifier.height(16.dp))
                 Row(Modifier.padding(start = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SectionLabel("Sort", Modifier.padding(end = 4.dp))
-                    SORTS.forEach { s -> Chip(s, selected = sort == s, onClick = { scope.launch { app.prefs.setPlaylistSort(playlistId, s) } }) }
+                    SORTS.forEach { s -> Chip(s, selected = sort == s, ascending = ascending, onClick = { scope.launch { app.prefs.setPlaylistSort(playlistId, s) } }) }
                 }
                 line?.let { PlainLine(it, Modifier.padding(start = 8.dp)) }
                 if (notShared) PlainLine(NOT_SHARED_LINE, Modifier.padding(start = 8.dp))
@@ -251,18 +256,10 @@ fun PlaylistScreen(
                     onClick = { playlist?.let { app.player.playInContext(it.uri, entry.index, it.id, entry.value.item?.uri) } },
                     onSwipeRight = { addTarget = AddTarget(track.uri, track.name) },
                     onPlus = { addTarget = AddTarget(track.uri, track.name) },
+                    onPlusLong = { newPlaylistFor = AddTarget(track.uri, track.name) },
                 )
             }
         }
-        MiniPlayer(
-            remote = app.remote,
-            playback = playback,
-            onToggle = { app.player.togglePlayPause() },
-            onNext = { app.player.next() },
-            onOpen = onOpenNowPlaying,
-            onPlus = onPlus,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
-        )
     }
 
     menuTrack?.let { t ->
@@ -272,7 +269,15 @@ fun PlaylistScreen(
             onAddTo = { addTarget = it },
             onGoToArtist = onOpenArtist,
             onGoToAlbum = onOpenAlbum,
-            onRemove = { scope.launch { if (!app.library.removeTrack(playlistId, t.uri)) line = "Spotify did not remove the song." } },
+            onRemove = {
+                // Undo (0.10): the row goes at once; Spotify hears about it when the pill is gone.
+                val hidden = app.library.hideTracks(playlistId, listOf(t.uri))
+                if (hidden == null) scope.launch { if (!app.library.removeTrack(playlistId, t.uri)) line = "Spotify did not remove the song." }
+                else app.undo.post(
+                    commit = { if (!app.library.removeTracksRemote(hidden)) line = "Spotify did not remove the song." },
+                    undo = { app.library.restoreTracks(hidden) },
+                )
+            },
             onDismiss = { menuTrack = null },
         )
     }
@@ -296,7 +301,7 @@ fun PlaylistScreen(
         ConfirmSheet(
             text = "Remove “${playlist.name}” from your library?",
             confirmLabel = "Delete",
-            onConfirm = { scope.launch { if (app.library.unfollow(playlist.id)) { app.prefs.forgetPlaylist(playlist.id); onDeleted() } else line = "Spotify did not delete it." } },
+            onConfirm = { deletePlaylistWithUndo(app, playlist); onDeleted() },
             onDismiss = { deleting = false },
         )
     }

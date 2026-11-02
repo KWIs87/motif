@@ -74,7 +74,9 @@ class Prefs(private val context: Context) {
         val locationAsked = booleanPreferencesKey("location_asked")
         val updateCheckedAt = longPreferencesKey("update_checked_at")
         val allSort = stringPreferencesKey("all_sort")
+        val allSortReversed = booleanPreferencesKey("all_sort_reversed")   // 0.10: direction flipped from the sort's natural one
         val playlistSort = stringPreferencesKey("playlist_sort")   // JSON map playlist id -> sort name
+        val playlistSortReversed = stringPreferencesKey("playlist_sort_reversed") // JSON list of playlist ids whose direction is flipped
     }
 
     val pins: Flow<List<String>> = store.data.map { decodeList(it[K.pins]) }
@@ -97,7 +99,11 @@ class Prefs(private val context: Context) {
     val locationAsked: Flow<Boolean> = store.data.map { it[K.locationAsked] ?: false }
     val updateCheckedAt: Flow<Long> = store.data.map { it[K.updateCheckedAt] ?: 0L }
     val allSort: Flow<String> = store.data.map { it[K.allSort] ?: "Recent" }
+    /** True when the All playlists sort runs against its natural direction (0.10, item 2). */
+    val allSortReversed: Flow<Boolean> = store.data.map { it[K.allSortReversed] ?: false }
     val playlistSorts: Flow<Map<String, String>> = store.data.map { p -> p[K.playlistSort]?.let { runCatching { json.decodeFromString<Map<String, String>>(it) }.getOrNull() } ?: emptyMap() }
+    /** Playlist ids whose sort runs against its natural direction. */
+    val playlistSortReversed: Flow<Set<String>> = store.data.map { decodeList(it[K.playlistSortReversed]).toSet() }
 
     suspend fun togglePin(playlistId: String) = store.edit { p ->
         val cur = decodeList(p[K.pins]).toMutableList()
@@ -145,11 +151,20 @@ class Prefs(private val context: Context) {
     suspend fun setPermissionsAsked() = store.edit { it[K.permissionsAsked] = true }
     suspend fun setLocationAsked() = store.edit { it[K.locationAsked] = true }
     suspend fun setUpdateCheckedAt(ms: Long) = store.edit { it[K.updateCheckedAt] = ms }
-    suspend fun setAllSort(sort: String) = store.edit { it[K.allSort] = sort }
+    /** Picks a sort; a different sort starts in its natural direction, the same one flips direction. */
+    suspend fun setAllSort(sort: String) = store.edit { p ->
+        val same = (p[K.allSort] ?: "Recent") == sort
+        p[K.allSort] = sort
+        p[K.allSortReversed] = if (same) !(p[K.allSortReversed] ?: false) else false
+    }
     suspend fun setPlaylistSort(playlistId: String, sort: String) = store.edit { p ->
         val cur = p[K.playlistSort]?.let { runCatching { json.decodeFromString<Map<String, String>>(it) }.getOrNull() }?.toMutableMap() ?: mutableMapOf()
+        val same = (cur[playlistId] ?: "Custom") == sort
         cur[playlistId] = sort
         p[K.playlistSort] = json.encodeToString(cur)
+        val rev = decodeList(p[K.playlistSortReversed]).toMutableSet()
+        if (same && sort != "Custom") { if (!rev.remove(playlistId)) rev += playlistId } else rev -= playlistId
+        p[K.playlistSortReversed] = json.encodeToString(rev.toList())
     }
 
     suspend fun appearanceNow(): Appearance = appearance.first()

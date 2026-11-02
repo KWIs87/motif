@@ -167,6 +167,7 @@ data class SpSearchResult(
     val playlists: SpPage<SpPlaylist?>? = null,
     val shows: SpPage<SpShow?>? = null,
     val episodes: SpPage<SpEpisode?>? = null,
+    val albums: SpPage<SpAlbum?>? = null,
 ) {
     val trackList: List<SpTrack> get() = tracks?.items?.filterNotNull().orEmpty()
     val artistList: List<SpArtist> get() = artists?.items?.filterNotNull().orEmpty()
@@ -178,6 +179,20 @@ data class SpSearchResult(
 
 @Serializable
 data class SpSnapshot(val snapshot_id: String)
+
+/** One Spotify Connect device (GET /me/player/devices). `type` is Smartphone, Computer, Speaker, TV, CastVideo... */
+@Serializable
+data class SpDevice(
+    val id: String? = null,
+    val name: String = "",
+    val type: String = "",
+    val is_active: Boolean = false,
+    val is_restricted: Boolean = false,
+    val volume_percent: Int? = null,
+)
+
+@Serializable
+data class SpDevices(val devices: List<SpDevice> = emptyList())
 
 @Serializable
 data class SpCurrentlyPlaying(

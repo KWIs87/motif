@@ -161,6 +161,62 @@ class Library(private val api: SpotifyApi) {
     suspend fun playlistOrFetch(id: String): SpPlaylist? =
         playlistById(id) ?: foreign[id] ?: api.playlist(id)?.also { foreign[id] = it }
 
+    // ---- Deferred removals (0.10, item 1: Undo) ----
+
+    /** What [hideTracks] took out, so [restoreTracks] can put it back exactly. */
+    class Hidden(val playlistId: String, val before: List<SpPlaylistItem>, val uris: List<String>)
+
+    /**
+     * Takes every row with one of [uris] out of the cached list (and the count) without telling
+     * Spotify. Call [removeTracksRemote] when the undo window closes, or [restoreTracks] to undo.
+     */
+    fun hideTracks(playlistId: String, uris: List<String>): Hidden? {
+        val flow = tracksCache[playlistId] ?: return null
+        val before = flow.value ?: return null
+        val set = uris.toSet()
+        val after = before.filterNot { it.item?.uri in set }
+        flow.value = after
+        val gone = before.size - after.size
+        _playlists.value = _playlists.value?.map { if (it.id == playlistId) it.withCount((it.itemCount ?: gone) - gone) else it }
+        return Hidden(playlistId, before, uris)
+    }
+
+    fun restoreTracks(h: Hidden) {
+        val flow = tracksCache[h.playlistId] ?: return
+        flow.value = h.before
+        _playlists.value = _playlists.value?.map { if (it.id == h.playlistId) it.withCount(h.before.size) else it }
+    }
+
+    /** The Spotify side of [hideTracks]; reloads the list when Spotify refused so the cache is honest. */
+    suspend fun removeTracksRemote(h: Hidden): Boolean {
+        var ok = true
+        for (chunk in h.uris.chunked(100)) if (!api.removeFromPlaylist(h.playlistId, chunk)) ok = false
+        if (!ok) refreshTracks(h.playlistId)
+        return ok
+    }
+
+    /** Takes a playlist off the local list without unfollowing it; [restorePlaylist] puts it back where it was. */
+    fun hidePlaylist(id: String): Pair<SpPlaylist, Int>? {
+        val cur = _playlists.value ?: return null
+        val i = cur.indexOfFirst { it.id == id }
+        if (i < 0) return null
+        _playlists.value = cur.filterIndexed { j, _ -> j != i }
+        return cur[i] to i
+    }
+
+    fun restorePlaylist(p: SpPlaylist, index: Int) {
+        val cur = _playlists.value?.toMutableList() ?: mutableListOf()
+        if (cur.none { it.id == p.id }) cur.add(index.coerceIn(0, cur.size), p)
+        _playlists.value = cur
+    }
+
+    /** The Spotify side of [hidePlaylist]; reloads the list when Spotify refused. */
+    suspend fun unfollowRemote(p: SpPlaylist): Boolean {
+        val ok = api.unfollowPlaylist(p.uri)
+        if (!ok) refreshPlaylists()
+        return ok
+    }
+
     suspend fun removeTrack(playlistId: String, trackUri: String): Boolean {
         val ok = api.removeFromPlaylist(playlistId, listOf(trackUri))
         if (ok) {

@@ -103,10 +103,8 @@ fun AddToPlaylistSheet(
     onDismiss: () -> Unit,
 ) {
     var filter by remember { mutableStateOf("") }
-    val shown = remember(playlists, filter) {
-        val q = filter.trim()
-        if (q.isEmpty()) playlists else playlists.filter { it.name.contains(q, ignoreCase = true) }
-    }
+    // Ranked (0.10, item 3): name starts with the text, then a word starts with it, then contains; recency order within each.
+    val shown = remember(playlists, filter) { rankByName(playlists, filter) { it.name } }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = motif.card,
