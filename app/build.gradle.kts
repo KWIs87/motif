@@ -27,8 +27,8 @@ android {
         applicationId = "com.kirkisham.motif"
         minSdk = 26
         targetSdk = 35
-        versionCode = 13
-        versionName = "0.10"
+        versionCode = 14
+        versionName = "0.11"
 
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"${cfg("SPOTIFY_CLIENT_ID", "9343a80fdf824a4e8c1b896312207ff0")}\"")
         buildConfigField("String", "SPOTIFY_REDIRECT_URI", "\"motif://callback\"")

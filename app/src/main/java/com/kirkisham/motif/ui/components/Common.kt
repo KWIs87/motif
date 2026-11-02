@@ -360,7 +360,7 @@ fun SongSubtitle(track: SpTrack, text: String) {
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(text, style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-        if (pc != null && pc.known) Text(
+        if (pc != null && pc.plays > 0) Text(
             " · " + Info.abbrev(pc.plays),
             style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1,
             modifier = Modifier.combinedClickableCompat(true, {}, { sheet = true }),
