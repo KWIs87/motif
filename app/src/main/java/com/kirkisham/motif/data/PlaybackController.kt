@@ -20,6 +20,7 @@ class PlaybackController(
     val remote: SpotifyRemote,
     private val prefs: Prefs,
     private val library: Library,
+    private val api: com.kirkisham.motif.auth.SpotifyApi,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -34,15 +35,31 @@ class PlaybackController(
         report(remote.play(p.uri))
     }
 
-    /** Plays [contextUri] starting at [index] (Spotify's own order). */
-    fun playInContext(contextUri: String, index: Int, playlistId: String? = null) = scope.launch {
+    /**
+     * Plays [contextUri] starting at the song [itemUri] (exact, by URI). [index] is Spotify's own position,
+     * used only as the fallback when the Web API has no active device to talk to.
+     */
+    fun playInContext(contextUri: String, index: Int, playlistId: String? = null, itemUri: String? = null) = scope.launch {
         playlistId?.let { prefs.markPlayed(it) }
         if (!ensure()) return@launch
         remote.setShuffle(false)
-        var ok = remote.skipToIndex(contextUri, index)
+        var ok = false
+        if (itemUri != null) {
+            ok = api.playContextAt(contextUri, itemUri)
+            if (!ok) {
+                // No active device yet: wake Spotify through App Remote, then ask again by URI.
+                if (remote.play(contextUri)) {
+                    delay(700)
+                    ok = api.playContextAt(contextUri, itemUri)
+                }
+            }
+        }
         if (!ok) {
-            ok = remote.play(contextUri)
-            if (ok && index > 0) remote.skipToIndex(contextUri, index)
+            ok = remote.skipToIndex(contextUri, index)
+            if (!ok) {
+                ok = remote.play(contextUri)
+                if (ok && index > 0) remote.skipToIndex(contextUri, index)
+            }
         }
         report(ok)
     }

@@ -59,7 +59,7 @@ class MotifApp : Application() {
         library = Library(api)
         prefs = Prefs(this)
         remote = SpotifyRemote(this)
-        player = PlaybackController(remote, prefs, library)
+        player = PlaybackController(remote, prefs, library, api)
         lyrics = Lyrics()
         info = Info(api)
         updates = Updates(this, prefs)

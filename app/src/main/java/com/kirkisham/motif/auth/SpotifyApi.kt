@@ -252,6 +252,17 @@ class SpotifyApi(private val auth: SpotifyAuth) {
         }
     }
 
+    /**
+     * Starts [contextUri] at the exact item [itemUri] on the user's active device (Web API player endpoint).
+     * Exact by URI, unlike App Remote's skipToIndex, whose index drifts past items Spotify can no longer play.
+     * Returns false when there is no active device (Spotify app asleep) or the call fails.
+     */
+    suspend fun playContextAt(contextUri: String, itemUri: String): Boolean =
+        sendOk("PUT", "$BASE/me/player/play", buildJsonObject {
+            put("context_uri", contextUri)
+            put("offset", buildJsonObject { put("uri", itemUri) })
+        })
+
     private suspend fun sendOk(method: String, url: String, body: JsonObject?): Boolean = withContext(Dispatchers.IO) {
         val token = auth.accessToken() ?: return@withContext false
         val rb = (body?.let { json.encodeToString(it) } ?: "").toRequestBody(jsonType)

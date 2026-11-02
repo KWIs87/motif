@@ -79,7 +79,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-private val SORTS = listOf("Name", "Artist", "Length", "Custom") // BPM chip hidden until Build 2 (spec §3.5)
+private val SORTS = listOf("Recent", "Name", "Artist", "Length", "Custom") // BPM chip hidden until Build 2 (spec §3.5)
 
 /**
  * Playlist (board Playlist): header, Play/Shuffle, sort chips, song rows.
@@ -128,8 +128,11 @@ fun PlaylistScreen(
     // Display order: Spotify's own order under Custom, otherwise sorted. Each entry keeps its Spotify index.
     val source = items ?: emptyList()
     val displayed = remember(source, sort) {
-        val indexed = source.withIndex().toList()
+        // Keep Spotify's index on every row (reorder/remove need it), but hide rows Spotify no longer returns
+        // (removed catalog tracks, local files): they would render as a blank "0:00" line.
+        val indexed = source.withIndex().filter { !it.value.item?.name.isNullOrBlank() }
         when (sort) {
+            "Recent" -> indexed.sortedByDescending { it.value.added_at ?: "" }
             "Name" -> indexed.sortedBy { it.value.item?.name?.lowercase() ?: "" }
             "Artist" -> indexed.sortedWith(compareBy({ it.value.item?.artistNames?.lowercase() ?: "" }, { it.value.item?.name?.lowercase() ?: "" }))
             "Length" -> indexed.sortedBy { it.value.item?.duration_ms ?: 0L }
@@ -246,7 +249,7 @@ fun PlaylistScreen(
                                 onDragCancel = { finishDrag() },
                             )
                         },
-                    onClick = { playlist?.let { app.player.playInContext(it.uri, entry.index, it.id) } },
+                    onClick = { playlist?.let { app.player.playInContext(it.uri, entry.index, it.id, entry.value.item?.uri) } },
                     onSwipeRight = { addTarget = AddTarget(track.uri, track.name) },
                     onPlus = { addTarget = AddTarget(track.uri, track.name) },
                 )
