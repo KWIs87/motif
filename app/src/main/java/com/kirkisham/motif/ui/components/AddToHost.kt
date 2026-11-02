@@ -7,8 +7,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kirkisham.motif.MotifApp
 import kotlinx.coroutines.launch
 
-/** What the plus button is adding: one track by URI, with a title for the sheet header. */
-data class AddTarget(val uri: String, val title: String)
+/** What the plus button is adding: one or more track URIs, with a title for the sheet header. */
+data class AddTarget(val uris: List<String>, val title: String) {
+    constructor(uri: String, title: String) : this(listOf(uri), title)
+}
 
 /**
  * The plus button's two sheets (board Menus): short press lists the 3 playlists most recently
@@ -37,7 +39,7 @@ fun AddToHost(
             others = all.filterNot { it.id in recentSet },
             onPick = { p ->
                 scope.launch {
-                    val ok = app.library.addTrack(p.id, target.uri)
+                    val ok = app.library.addTracks(p.id, target.uris)
                     if (ok) { app.prefs.markAddedTo(p.id); onDone("Added to ${p.name}") } else onDone("Could not add to ${p.name}")
                 }
             },
@@ -52,9 +54,9 @@ fun AddToHost(
                 scope.launch {
                     val p = app.library.create(name)
                     if (p == null) { onDone("Could not create the playlist"); return@launch }
-                    val ok = app.library.addTrack(p.id, newPlaylistFor.uri)
+                    val ok = app.library.addTracks(p.id, newPlaylistFor.uris)
                     if (ok) app.prefs.markAddedTo(p.id)
-                    onDone(if (ok) "Added to $name" else "Created $name, but the song did not add")
+                    onDone(if (ok) "Added to $name" else "Created $name, but the songs did not add")
                 }
             },
             onDismiss = onDismiss,

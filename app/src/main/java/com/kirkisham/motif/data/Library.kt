@@ -73,16 +73,77 @@ class Library(private val api: SpotifyApi) {
         return p
     }
 
-    suspend fun addTrack(playlistId: String, trackUri: String): Boolean {
-        val ok = api.addToPlaylist(playlistId, listOf(trackUri))
-        if (ok) {
+    suspend fun addTrack(playlistId: String, trackUri: String): Boolean = addTracks(playlistId, listOf(trackUri))
+
+    /** Adds several URIs (100 per request, Spotify's limit). False if any chunk failed. */
+    suspend fun addTracks(playlistId: String, trackUris: List<String>): Boolean {
+        if (trackUris.isEmpty()) return true
+        var ok = true
+        var added = 0
+        for (chunk in trackUris.chunked(100)) {
+            if (api.addToPlaylist(playlistId, chunk)) added += chunk.size else ok = false
+        }
+        if (added > 0) {
             _playlists.value = _playlists.value?.map {
-                if (it.id == playlistId) it.copy(tracks = SpTracksRef((it.tracks?.total ?: 0) + 1)) else it
+                if (it.id == playlistId) it.copy(tracks = SpTracksRef((it.tracks?.total ?: 0) + added)) else it
             }
             tracksCache[playlistId]?.value = null // reload next time it is opened
         }
         return ok
     }
+
+    /** Removes every occurrence of each URI (Spotify removes by URI, not position). */
+    suspend fun removeTracks(playlistId: String, trackUris: List<String>): Boolean {
+        if (trackUris.isEmpty()) return true
+        var ok = true
+        for (chunk in trackUris.chunked(100)) {
+            if (api.removeFromPlaylist(playlistId, chunk)) {
+                val set = chunk.toSet()
+                tracksCache[playlistId]?.let { f ->
+                    val before = f.value?.size ?: 0
+                    f.value = f.value?.filterNot { it.track?.uri in set }
+                    val gone = before - (f.value?.size ?: 0)
+                    _playlists.value = _playlists.value?.map {
+                        if (it.id == playlistId) it.copy(tracks = SpTracksRef(maxOf(0, (it.tracks?.total ?: gone) - gone))) else it
+                    }
+                }
+            } else ok = false
+        }
+        return ok
+    }
+
+    /** One mass-edit step, recorded in the order the user made it (indices are Spotify's at that moment). */
+    sealed interface EditOp {
+        data class Move(val from: Int, val to: Int) : EditOp
+        data class Remove(val uris: List<String>) : EditOp
+    }
+
+    /**
+     * Replays mass-edit steps on Spotify in order, so every Move sees the same list the user saw.
+     * Stops at the first failure; the playlist is reloaded either way. Returns true when all applied.
+     */
+    suspend fun applyEdits(playlistId: String, ops: List<EditOp>): Boolean = lock.withLock {
+        var ok = true
+        for (op in ops) {
+            val stepOk = when (op) {
+                is EditOp.Move -> if (op.from == op.to) true
+                    else api.reorderPlaylist(playlistId, op.from, if (op.to > op.from) op.to + 1 else op.to) != null
+                is EditOp.Remove -> op.uris.chunked(100).all { api.removeFromPlaylist(playlistId, it) }
+            }
+            if (!stepOk) { ok = false; break }
+        }
+        if (ops.isNotEmpty()) {
+            refreshTracks(playlistId)
+            val n = tracksCache[playlistId]?.value?.size
+            if (n != null) _playlists.value = _playlists.value?.map { if (it.id == playlistId) it.copy(tracks = SpTracksRef(n)) else it }
+        }
+        return ok
+    }
+
+    /** A playlist outside the library (search result): fetched once and kept for the session. */
+    private val foreign = mutableMapOf<String, SpPlaylist>()
+    suspend fun playlistOrFetch(id: String): SpPlaylist? =
+        playlistById(id) ?: foreign[id] ?: api.playlist(id)?.also { foreign[id] = it }
 
     suspend fun removeTrack(playlistId: String, trackUri: String): Boolean {
         val ok = api.removeFromPlaylist(playlistId, listOf(trackUri))

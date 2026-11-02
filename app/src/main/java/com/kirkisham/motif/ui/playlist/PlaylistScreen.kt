@@ -26,8 +26,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.MoreHoriz
-import androidx.compose.material.icons.outlined.PlaylistAdd
-import androidx.compose.material.icons.outlined.QueueMusic
+import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Shuffle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kirkisham.motif.MotifApp
+import com.kirkisham.motif.data.SpArtist
+import com.kirkisham.motif.data.SpPlaylist
 import com.kirkisham.motif.data.SpTrack
 import com.kirkisham.motif.ui.components.AddTarget
 import com.kirkisham.motif.ui.components.AddToHost
@@ -67,6 +68,7 @@ import com.kirkisham.motif.ui.components.MiniPlayer
 import com.kirkisham.motif.ui.components.NameSheet
 import com.kirkisham.motif.ui.components.PlainLine
 import com.kirkisham.motif.ui.components.SectionLabel
+import com.kirkisham.motif.ui.components.SongMenuSheet
 import com.kirkisham.motif.ui.components.TopBar
 import com.kirkisham.motif.ui.components.formatClock
 import com.kirkisham.motif.ui.components.formatLength
@@ -91,13 +93,17 @@ fun PlaylistScreen(
     onOpenNowPlaying: () -> Unit,
     onPlus: (() -> Unit)?,
     onDeleted: () -> Unit,
+    onMassEdit: () -> Unit,
+    onOpenArtist: (SpArtist) -> Unit,
 ) {
     val playlists by app.library.playlists.collectAsStateWithLifecycle()
     val items by app.library.tracksFlow(playlistId).collectAsStateWithLifecycle()
     val sorts by app.prefs.playlistSorts.collectAsStateWithLifecycle(emptyMap())
     val playback by app.remote.playback.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    val playlist = playlists?.firstOrNull { it.id == playlistId }
+    // Playlists outside the library (opened from Search) are fetched once and kept for the session.
+    var foreign by remember { mutableStateOf<SpPlaylist?>(null) }
+    val playlist = playlists?.firstOrNull { it.id == playlistId } ?: foreign
     val sort = sorts[playlistId] ?: "Custom"
 
     var menuTrack by remember { mutableStateOf<SpTrack?>(null) }
@@ -110,7 +116,10 @@ fun PlaylistScreen(
 
     LaunchedEffect(playlistId) {
         if (items == null) app.library.refreshTracks(playlistId)
-        if (playlist == null) app.library.refreshPlaylists()
+        if (playlist == null) {
+            app.library.refreshPlaylists()
+            if (app.library.playlistById(playlistId) == null) foreign = app.library.playlistOrFetch(playlistId)
+        }
     }
 
     // Display order: Spotify's own order under Custom, otherwise sorted. Each entry keeps its Spotify index.
@@ -247,16 +256,12 @@ fun PlaylistScreen(
     }
 
     menuTrack?.let { t ->
-        MenuSheet(
-            title = t.name,
-            subtitle = t.artistNames,
-            items = listOf(
-                MenuItem("Play next", Icons.Outlined.QueueMusic) { app.player.queue(t.uri) },
-                MenuItem("Add to playlist", Icons.Outlined.PlaylistAdd) { addTarget = AddTarget(t.uri, t.name) },
-                MenuItem("Remove from this playlist", Icons.Outlined.Delete, Color(0xFFC96E6E)) {
-                    scope.launch { if (!app.library.removeTrack(playlistId, t.uri)) line = "Spotify did not remove the song." }
-                },
-            ),
+        SongMenuSheet(
+            app = app,
+            track = t,
+            onAddTo = { addTarget = it },
+            onGoToArtist = onOpenArtist,
+            onRemove = { scope.launch { if (!app.library.removeTrack(playlistId, t.uri)) line = "Spotify did not remove the song." } },
             onDismiss = { menuTrack = null },
         )
     }
@@ -266,6 +271,7 @@ fun PlaylistScreen(
         MenuSheet(
             title = playlist.name,
             items = listOf(
+                MenuItem("Mass edit", Icons.Outlined.Checklist) { onMassEdit() },
                 MenuItem("Rename", Icons.Outlined.DriveFileRenameOutline) { renaming = true },
                 MenuItem("Delete", Icons.Outlined.Delete, Color(0xFFC96E6E)) { deleting = true },
             ),

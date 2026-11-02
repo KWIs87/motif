@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -179,6 +180,40 @@ fun ListRow(
             trailing()
         }
         if (divider) Hairline()
+    }
+}
+
+/** 56 dp song row for result lists: 40 dp cover, title (accent when playing), "Artist · 3:42", plus. */
+@Composable
+fun TrackRow(
+    track: com.kirkisham.motif.data.SpTrack,
+    playing: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+    onPlus: (() -> Unit)? = null,
+    plusTint: Color = motif.textMuted,
+) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .then(
+                if (onLongClick != null) Modifier.combinedClickableCompat(true, onClick, onLongClick)
+                else Modifier.clickable(onClick = onClick),
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Cover(track.smallCoverUrl, 40.dp, radius = 3.dp)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(track.name, style = MaterialTheme.typography.labelLarge, color = if (playing) motif.accent else motif.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                if (track.duration_ms > 0) "${track.artistNames} · ${formatClock(track.duration_ms)}" else track.artistNames,
+                style = MaterialTheme.typography.bodySmall, color = motif.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (onPlus != null) IconButton44(Icons.Outlined.Add, "Add to playlist", onPlus, tint = plusTint, size = 18.dp)
     }
 }
 

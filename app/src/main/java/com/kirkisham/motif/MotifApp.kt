@@ -42,6 +42,8 @@ class MotifApp : Application() {
         private set
     lateinit var alarmScheduler: AlarmScheduler
         private set
+    /** Fire-and-forget work that must outlive a screen (mass edit save, update check). */
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     override fun onCreate() {
         super.onCreate()
@@ -57,7 +59,7 @@ class MotifApp : Application() {
         alarmScheduler = AlarmScheduler(this, alarmStore)
 
         // Keep the widget in step with playback and with the style settings, whenever this process is alive.
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val scope = appScope
         scope.launch {
             remote.playback
                 .map { p -> p?.let { Triple(it.uri, it.isPaused, it.imageUri) } }

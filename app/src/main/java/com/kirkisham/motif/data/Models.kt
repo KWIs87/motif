@@ -30,10 +30,27 @@ data class SpPlaylist(
 }
 
 @Serializable
-data class SpArtist(val name: String, val uri: String? = null, val id: String? = null)
+data class SpArtist(
+    val name: String,
+    val uri: String? = null,
+    val id: String? = null,
+    /** Present on full artist objects (GET /artists/{id}, search). */
+    val images: List<SpImage>? = null,
+    val genres: List<String>? = null,
+) {
+    val imageUrl: String? get() = images?.firstOrNull()?.url
+    val smallImageUrl: String? get() = images?.minByOrNull { it.width ?: Int.MAX_VALUE }?.url ?: imageUrl
+}
 
 @Serializable
-data class SpAlbum(val name: String? = null, val uri: String? = null, val images: List<SpImage>? = null)
+data class SpAlbum(
+    val name: String? = null,
+    val uri: String? = null,
+    val images: List<SpImage>? = null,
+    val release_date: String? = null,
+) {
+    val year: String? get() = release_date?.take(4)?.takeIf { it.length == 4 && it.all(Char::isDigit) }
+}
 
 @Serializable
 data class SpTrack(
@@ -69,8 +86,10 @@ data class SpShow(
     val uri: String,
     val publisher: String? = null,
     val images: List<SpImage>? = null,
+    val total_episodes: Int? = null,
 ) {
     val coverUrl: String? get() = images?.firstOrNull()?.url
+    val smallCoverUrl: String? get() = images?.minByOrNull { it.width ?: Int.MAX_VALUE }?.url ?: coverUrl
 }
 
 @Serializable
@@ -91,10 +110,25 @@ data class SpEpisode(
     val show: SpShow? = null,
 ) {
     val coverUrl: String? get() = images?.firstOrNull()?.url ?: show?.coverUrl
+    val smallCoverUrl: String? get() = images?.minByOrNull { it.width ?: Int.MAX_VALUE }?.url ?: show?.smallCoverUrl ?: coverUrl
 }
 
+/** GET /search. Spotify pads some pages with nulls, so every item type is nullable here. */
 @Serializable
-data class SpSearchResult(val tracks: SpPage<SpTrack>? = null)
+data class SpSearchResult(
+    val tracks: SpPage<SpTrack?>? = null,
+    val artists: SpPage<SpArtist?>? = null,
+    val playlists: SpPage<SpPlaylist?>? = null,
+    val shows: SpPage<SpShow?>? = null,
+    val episodes: SpPage<SpEpisode?>? = null,
+) {
+    val trackList: List<SpTrack> get() = tracks?.items?.filterNotNull().orEmpty()
+    val artistList: List<SpArtist> get() = artists?.items?.filterNotNull().orEmpty()
+    val playlistList: List<SpPlaylist> get() = playlists?.items?.filterNotNull().orEmpty()
+    val showList: List<SpShow> get() = shows?.items?.filterNotNull().orEmpty()
+    val episodeList: List<SpEpisode> get() = episodes?.items?.filterNotNull().orEmpty()
+    val isEmpty: Boolean get() = trackList.isEmpty() && artistList.isEmpty() && playlistList.isEmpty() && showList.isEmpty() && episodeList.isEmpty()
+}
 
 @Serializable
 data class SpSnapshot(val snapshot_id: String)

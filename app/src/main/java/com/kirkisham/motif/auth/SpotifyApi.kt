@@ -1,6 +1,7 @@
 package com.kirkisham.motif.auth
 
 import android.util.Log
+import com.kirkisham.motif.data.SpArtist
 import com.kirkisham.motif.data.SpCurrentlyPlaying
 import com.kirkisham.motif.data.SpEpisode
 import com.kirkisham.motif.data.SpPage
@@ -71,16 +72,28 @@ class SpotifyApi(private val auth: SpotifyAuth) {
     /** What Spotify is playing on any device right now, episodes included. Null when nothing is. */
     suspend fun currentlyPlaying(): SpCurrentlyPlaying? = get("$BASE/me/player?additional_types=episode")
 
-    suspend fun searchTracks(query: String, limit: Int = 25): List<SpTrack>? {
-        if (query.isBlank()) return emptyList()
+    /** Songs only (alarm song picker). */
+    suspend fun searchTracks(query: String, limit: Int = 25): List<SpTrack>? =
+        search(query, "track", limit)?.trackList
+
+    /**
+     * One GET /search across [types] (comma-separated Spotify types). Shows and episodes need a
+     * market, so from_token is always sent. Null on failure, an empty result for a blank query.
+     */
+    suspend fun search(query: String, types: String = "track,artist,playlist,show,episode", limit: Int = 10): SpSearchResult? {
+        if (query.isBlank()) return SpSearchResult()
         val q = URLEncoder.encode(query, "UTF-8")
-        return get<SpSearchResult>("$BASE/search?type=track&limit=$limit&q=$q")?.tracks?.items
+        return get("$BASE/search?type=$types&limit=$limit&market=from_token&q=$q")
     }
 
     suspend fun tracks(ids: List<String>): List<SpTrack>? {
         if (ids.isEmpty()) return emptyList()
         return get<TracksWrap>("$BASE/tracks?ids=${ids.take(50).joinToString(",")}")?.tracks?.filterNotNull()
     }
+
+    suspend fun track(id: String): SpTrack? = get("$BASE/tracks/$id")
+
+    suspend fun artist(id: String): SpArtist? = get("$BASE/artists/$id")
 
     // ---- Playlist edits ----
 

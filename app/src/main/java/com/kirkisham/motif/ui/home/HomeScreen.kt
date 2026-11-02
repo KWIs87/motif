@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -68,6 +69,7 @@ fun HomeScreen(
     onOpenNowPlaying: () -> Unit,
     onOpenAlarm: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenSearch: () -> Unit,
     onPlus: (() -> Unit)?,
 ) {
     val playlists by app.library.playlists.collectAsStateWithLifecycle()
@@ -101,6 +103,7 @@ fun HomeScreen(
                     Text("Playlists", style = MaterialTheme.typography.headlineMedium, color = motif.text, modifier = Modifier.weight(1f))
                     // Star: Claude sheet, Build 2. Shows nothing yet (spec §3.3).
                     IconButton44(Icons.Outlined.AutoAwesome, "Ask Claude (later)", onClick = {}, tint = motif.accent)
+                    IconButton44(Icons.Outlined.Search, "Search", onOpenSearch)
                     IconButton44(Icons.Outlined.Schedule, "Alarm", onOpenAlarm)
                     IconButton44(Icons.Outlined.Settings, "Settings", onOpenSettings, tint = motif.textMuted)
                 }

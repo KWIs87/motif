@@ -1,5 +1,6 @@
 package com.kirkisham.motif.ui
 
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -17,10 +18,16 @@ import com.kirkisham.motif.ui.components.AddTarget
 import com.kirkisham.motif.ui.components.AddToHost
 import com.kirkisham.motif.ui.alarm.AlarmScreen
 import com.kirkisham.motif.ui.home.HomeScreen
+import com.kirkisham.motif.ui.info.InfoKind
+import com.kirkisham.motif.ui.info.InfoScreen
 import com.kirkisham.motif.ui.nowplaying.NowPlayingScreen
+import com.kirkisham.motif.ui.playlist.MassEditScreen
 import com.kirkisham.motif.ui.playlist.PlaylistScreen
 import com.kirkisham.motif.ui.playlists.AllPlaylistsScreen
+import com.kirkisham.motif.ui.search.SearchScreen
 import com.kirkisham.motif.ui.settings.SettingsScreen
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 
 /** Route names. Screens are added here as the build order reaches them (CLAUDE.md). */
 object Routes {
@@ -30,7 +37,14 @@ object Routes {
     const val NOW = "now"
     const val SETTINGS = "settings"
     const val ALARM = "alarm"
+    const val SEARCH = "search?q={q}"
+    const val MASS_EDIT = "massedit/{id}"
+    const val INFO = "info/{kind}/{id}"
     fun playlist(id: String) = "playlist/$id"
+    fun search(query: String = "") = "search?q=" + Uri.encode(query)
+    fun massEdit(id: String) = "massedit/$id"
+    fun infoTrack(id: String) = "info/track/$id"
+    fun infoArtist(id: String) = "info/artist/$id"
 }
 
 @Composable
@@ -64,8 +78,29 @@ fun MotifNavHost(
                 onOpenNowPlaying = { nav.navigate(Routes.NOW) },
                 onOpenAlarm = { nav.navigate(Routes.ALARM) },
                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
+                onOpenSearch = { nav.navigate(Routes.search()) },
                 onPlus = onPlus,
             )
+        }
+        composable(Routes.SEARCH, arguments = listOf(navArgument("q") { type = NavType.StringType; defaultValue = "" })) { entry ->
+            SearchScreen(
+                app = app,
+                initialQuery = entry.arguments?.getString("q").orEmpty(),
+                onBack = { nav.popBackStack() },
+                onOpenPlaylist = { nav.navigate(Routes.playlist(it)) },
+                onOpenArtist = { a -> a.id?.let { nav.navigate(Routes.infoArtist(it)) } },
+                onOpenNowPlaying = { nav.navigate(Routes.NOW) },
+                onPlus = onPlus,
+            )
+        }
+        composable(Routes.MASS_EDIT) { entry ->
+            val id = entry.arguments?.getString("id") ?: return@composable
+            MassEditScreen(app, id, onClose = { nav.popBackStack() })
+        }
+        composable(Routes.INFO) { entry ->
+            val id = entry.arguments?.getString("id") ?: return@composable
+            val kind = if (entry.arguments?.getString("kind") == "artist") InfoKind.ARTIST else InfoKind.TRACK
+            InfoScreen(app, kind, id, onBack = { nav.popBackStack() })
         }
         composable(Routes.ALL) {
             AllPlaylistsScreen(
@@ -85,6 +120,8 @@ fun MotifNavHost(
                 onOpenNowPlaying = { nav.navigate(Routes.NOW) },
                 onPlus = onPlus,
                 onDeleted = { nav.popBackStack() },
+                onMassEdit = { nav.navigate(Routes.massEdit(id)) },
+                onOpenArtist = { a -> a.id?.let { nav.navigate(Routes.infoArtist(it)) } },
             )
         }
         composable(Routes.NOW) { NowPlayingScreen(app, onBack = { nav.popBackStack() }) }
