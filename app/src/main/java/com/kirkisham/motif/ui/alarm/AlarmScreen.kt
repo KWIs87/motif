@@ -35,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DragHandle
+import androidx.compose.material.icons.automirrored.outlined.Backspace
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,10 +45,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TimePicker
-import androidx.compose.material3.TimePickerDefaults
 import androidx.compose.material3.rememberDatePickerState
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -62,7 +60,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -115,7 +121,10 @@ fun AlarmScreen(app: MotifApp, onBack: () -> Unit) {
     val context = LocalContext.current
     var draft by remember { mutableStateOf(Alarm.blank(UUID.randomUUID().toString())) }
     var editingExisting by remember { mutableStateOf(false) }
-    var pickTime by remember { mutableStateOf(false) }
+    // Time entry (0.11): an inline keypad under the big time replaces the Material dial sheet.
+    // Open from the start for a new alarm; Edit opens it on tap. [digits] is the dialer-style entry.
+    var keypadOpen by remember { mutableStateOf(true) }
+    var digits by remember { mutableStateOf("") }
     var pickDate by remember { mutableStateOf(false) }
     var pickSongs by remember { mutableStateOf(false) }
     var customMinutes by remember { mutableStateOf(false) }
@@ -148,7 +157,20 @@ fun AlarmScreen(app: MotifApp, onBack: () -> Unit) {
             line = if (a.songs.isEmpty()) "Saved. No songs yet, so it will ring with the built-in tone." else "Saved."
             draft = Alarm.blank(UUID.randomUUID().toString())
             editingExisting = false
+            digits = ""; keypadOpen = true
         }
+    }
+
+    /** Dialer entry → clamped time written straight into the draft so "Rings in" and Save see it. */
+    fun applyDigits(d: String) {
+        digits = d
+        if (d.isEmpty()) return
+        val h12 = d.dropLast(2).toIntOrNull() ?: 0
+        val m = (d.takeLast(2).toIntOrNull() ?: 0).coerceAtMost(59)
+        val hour12 = h12.coerceAtMost(12).let { if (it == 0) 12 else it }
+        val pm = draft.hour >= 12
+        val hour = (hour12 % 12) + (if (pm) 12 else 0)
+        draft = draft.copy(hour = hour, minute = m)
     }
 
     // Song drag to reorder (same technique as the Playlist screen).
@@ -168,6 +190,20 @@ fun AlarmScreen(app: MotifApp, onBack: () -> Unit) {
     val firstLen = ((draft.songs.firstOrNull()?.durationMs ?: 0L) / 1000).toInt()
     val next = remember(draft, now) { draft.copy(enabled = true).nextTrigger() }
 
+    // A press anywhere outside the time block closes the keypad (watched on the Initial pass, never consumed,
+    // so the press still scrolls or taps whatever it landed on).
+    var keypadBounds by remember { mutableStateOf<Rect?>(null) }
+    var rootCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    Box(
+        Modifier.fillMaxSize().onGloballyPositioned { rootCoords = it }.pointerInput(keypadOpen) {
+            if (!keypadOpen) return@pointerInput
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                val root = rootCoords?.localToRoot(down.position) ?: return@awaitEachGesture
+                if (keypadBounds?.contains(root) != true) { keypadOpen = false; digits = "" }
+            }
+        },
+    ) {
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding(),
         contentPadding = PaddingValues(start = 16.dp, end = 24.dp, bottom = MINI_PLAYER_SPACE),
@@ -206,15 +242,34 @@ fun AlarmScreen(app: MotifApp, onBack: () -> Unit) {
         }
         line?.let { l -> item { PlainLine(l, Modifier.padding(start = 8.dp)) } }
 
-        // Time
+        // Time (0.11): the big time is the control; tapping it opens the keypad below.
         item {
-            Column(Modifier.fillMaxWidth().padding(start = 8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(Modifier.clickable { pickTime = true }, verticalAlignment = Alignment.Bottom) {
+            Column(
+                Modifier.fillMaxWidth().padding(start = 8.dp).onGloballyPositioned { keypadBounds = it.boundsInRoot() },
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(Modifier.clickable { if (!keypadOpen) { digits = ""; keypadOpen = true } }, verticalAlignment = Alignment.Bottom) {
                     val h12 = if (draft.hour % 12 == 0) 12 else draft.hour % 12
-                    Text("%d:%02d".format(h12, draft.minute), fontSize = 64.sp, fontWeight = FontWeight.Light, letterSpacing = (-1).sp, color = motif.text, lineHeight = 64.sp)
+                    // While typing, show the entry as a dialer would: "–:–6", "–:63", "6:30", "12:15".
+                    val shown = if (keypadOpen && digits.isNotEmpty()) {
+                        val h = digits.dropLast(2).ifEmpty { "\u2013" }
+                        val m = digits.takeLast(2).padStart(2, '\u2013')
+                        "$h:$m"
+                    } else "%d:%02d".format(h12, draft.minute)
+                    Text(shown, fontSize = 64.sp, fontWeight = FontWeight.Light, letterSpacing = (-1).sp, color = motif.text, lineHeight = 64.sp)
                     Text(if (draft.hour < 12) "AM" else "PM", fontSize = 22.sp, color = motif.textMuted, modifier = Modifier.padding(start = 8.dp, bottom = 10.dp))
                 }
                 Text(ringsIn(next, now), style = MaterialTheme.typography.bodySmall, color = motif.textMuted)
+                if (keypadOpen) {
+                    TimeKeypad(
+                        pm = draft.hour >= 12,
+                        onDigit = { d -> applyDigits((digits + d).takeLast(4)) },
+                        onBackspace = { applyDigits(digits.dropLast(1)) },
+                        onPeriod = { pm -> draft = draft.copy(hour = (draft.hour % 12) + (if (pm) 12 else 0)) },
+                        onDone = { keypadOpen = false; digits = "" },
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
             }
         }
 
@@ -368,7 +423,7 @@ fun AlarmScreen(app: MotifApp, onBack: () -> Unit) {
                 saved.forEach { a ->
                     Row(
                         Modifier.fillMaxWidth().height(64.dp)
-                            .combinedClickableCompat(true, { draft = a; editingExisting = true; line = null }, { deleting = a }),
+                            .combinedClickableCompat(true, { draft = a; editingExisting = true; line = null; keypadOpen = false; digits = "" }, { deleting = a }),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -387,8 +442,8 @@ fun AlarmScreen(app: MotifApp, onBack: () -> Unit) {
             }
         }
     }
+    }
 
-    if (pickTime) TimeSheet(draft.hour, draft.minute, onPick = { h, m -> draft = draft.copy(hour = h, minute = m) }, onDismiss = { pickTime = false })
     if (pickDate) DateSheet(draft.date, onPick = { draft = draft.copy(date = it.toString()) }, onDismiss = { pickDate = false })
     if (pickSongs) SongPickerSheet(app, draft.songs, onAdd = { draft = draft.copy(songs = draft.songs + it) }, onDismiss = { pickSongs = false })
     if (customMinutes) MinutesSheet(draft.playForMinutes, onPick = { draft = draft.copy(playForMinutes = it) }, onDismiss = { customMinutes = false })
@@ -397,7 +452,7 @@ fun AlarmScreen(app: MotifApp, onBack: () -> Unit) {
             onConfirm = {
                 scope.launch {
                     app.alarmScheduler.cancel(a.id); app.alarmStore.delete(a.id)
-                    if (draft.id == a.id) { draft = Alarm.blank(UUID.randomUUID().toString()); editingExisting = false }
+                    if (draft.id == a.id) { draft = Alarm.blank(UUID.randomUUID().toString()); editingExisting = false; digits = ""; keypadOpen = true }
                     // Undo (0.10): the alarm object is in hand, so undo saves and schedules it again.
                     app.undo.post("Deleted", undo = { app.alarmStore.save(a); if (a.enabled) app.alarmScheduler.schedule(a) })
                 }
@@ -447,24 +502,54 @@ private fun SliderRow(label: String, value: String, valueF: Float, enabled: Bool
     Hairline()
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Inline time keypad (0.11): digits 1–9, then AM/PM, 0 and backspace, 56 dp hairline keys in the
+ * Motif style, plus a small Done. Entry fills right to left like a phone dialer; the caller clamps.
+ */
 @Composable
-private fun TimeSheet(hour: Int, minute: Int, onPick: (Int, Int) -> Unit, onDismiss: () -> Unit) {
-    val state = rememberTimePickerState(initialHour = hour, initialMinute = minute, is24Hour = false)
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = motif.card, contentColor = motif.text, dragHandle = null, shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)) {
-        Column(Modifier.fillMaxWidth().padding(20.dp).navigationBarsPadding(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            TimePicker(
-                state = state,
-                colors = TimePickerDefaults.colors(
-                    clockDialColor = motif.ground, clockDialSelectedContentColor = motif.ground, clockDialUnselectedContentColor = motif.text,
-                    selectorColor = motif.accent, containerColor = motif.card,
-                    periodSelectorBorderColor = motif.chipLine, periodSelectorSelectedContainerColor = motif.accent, periodSelectorSelectedContentColor = motif.ground,
-                    periodSelectorUnselectedContentColor = motif.textMuted, periodSelectorUnselectedContainerColor = motif.card,
-                    timeSelectorSelectedContainerColor = motif.text, timeSelectorSelectedContentColor = motif.ground,
-                    timeSelectorUnselectedContainerColor = motif.ground, timeSelectorUnselectedContentColor = motif.text,
-                ),
+private fun TimeKeypad(
+    pm: Boolean,
+    onDigit: (Char) -> Unit,
+    onBackspace: () -> Unit,
+    onPeriod: (Boolean) -> Unit,
+    onDone: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(10.dp)
+    @Composable
+    fun Key(modifier: Modifier, onClick: () -> Unit, content: @Composable () -> Unit) {
+        Box(
+            modifier.height(56.dp).clip(shape).border(1.dp, motif.chipLine, shape).clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) { content() }
+    }
+    @Composable
+    fun Digit(c: Char, modifier: Modifier) = Key(modifier, { onDigit(c) }) {
+        Text(c.toString(), fontSize = 22.sp, fontWeight = FontWeight.Light, color = motif.text)
+    }
+    Column(modifier.fillMaxWidth(0.8f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        listOf("123", "456", "789").forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { c -> Digit(c, Modifier.weight(1f)) }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Key(Modifier.weight(1f), { onPeriod(!pm) }) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("AM", fontSize = 14.sp, fontWeight = if (!pm) FontWeight.Medium else FontWeight.Light, color = if (!pm) motif.text else motif.textDim)
+                    Text("PM", fontSize = 14.sp, fontWeight = if (pm) FontWeight.Medium else FontWeight.Light, color = if (pm) motif.text else motif.textDim)
+                }
+            }
+            Digit('0', Modifier.weight(1f))
+            Key(Modifier.weight(1f), onBackspace) {
+                Icon(Icons.AutoMirrored.Outlined.Backspace, "Backspace", tint = motif.textMuted, modifier = Modifier.size(20.dp))
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Text(
+                "Done", style = MaterialTheme.typography.labelLarge, color = motif.accent, textAlign = TextAlign.Center,
+                modifier = Modifier.clip(shape).clickable(onClick = onDone).padding(horizontal = 16.dp, vertical = 12.dp),
             )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { PillButton("Set") { onPick(state.hour, state.minute); onDismiss() } }
         }
     }
 }
