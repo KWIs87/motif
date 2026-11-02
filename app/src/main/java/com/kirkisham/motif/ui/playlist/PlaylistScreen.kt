@@ -79,8 +79,8 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private val SORTS = listOf("Recent", "Name", "Artist", "Length", "Custom") // BPM chip hidden until Build 2 (spec §3.5)
-/** Natural direction per sort: Recent newest first, the rest A to Z / shortest first. Custom has none. */
-private fun naturalAscending(sort: String): Boolean? = when (sort) { "Custom" -> null; "Recent" -> false; else -> true }
+/** Natural direction per sort: Recent newest first, the rest A to Z / shortest first; Custom ▲ is the playlist's own order (0.11). */
+private fun naturalAscending(sort: String): Boolean? = when (sort) { "Recent" -> false; else -> true }
 
 /**
  * Playlist (board Playlist): header, Play/Shuffle, sort chips, song rows.
@@ -141,7 +141,7 @@ fun PlaylistScreen(
             "Length" -> indexed.sortedBy { it.value.item?.duration_ms ?: 0L }
             else -> indexed
         }
-        if (reversed && sort != "Custom") natural.asReversed() else natural
+        if (reversed) natural.asReversed() else natural
     }
     val totalMs = source.sumOf { it.item?.duration_ms ?: 0L }
 
@@ -167,14 +167,17 @@ fun PlaylistScreen(
         if (toDisplay == from) return
         val item = displayed[from]
         val reordered = displayed.toMutableList().also { it.removeAt(from); it.add(toDisplay, item) }
-        val above = reordered.getOrNull(toDisplay - 1)
+        // The song lands right after its neighbour in Spotify's order: the row above it when the list reads
+        // top-down, the row below it when the list is reversed (0.11: Custom ▾ reorders the true order).
+        val anchor = if (reversed) reordered.getOrNull(toDisplay + 1) else reordered.getOrNull(toDisplay - 1)
         val fromSp = item.index
-        val toSp = if (above == null) 0 else {
-            val a = above.index
+        val toSp = if (anchor == null) 0 else {
+            val a = anchor.index
             (if (a < fromSp) a else a - 1) + 1
         }
         scope.launch {
-            app.prefs.setPlaylistSort(playlistId, "Custom")
+            // A drop while sorted switches to Custom (natural direction); under Custom the direction is kept.
+            if (sort != "Custom") app.prefs.setPlaylistSort(playlistId, "Custom")
             if (!app.library.move(playlistId, fromSp, toSp)) line = "Spotify did not save the new order."
         }
     }

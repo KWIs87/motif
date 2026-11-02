@@ -163,7 +163,8 @@ class Prefs(private val context: Context) {
         cur[playlistId] = sort
         p[K.playlistSort] = json.encodeToString(cur)
         val rev = decodeList(p[K.playlistSortReversed]).toMutableSet()
-        if (same && sort != "Custom") { if (!rev.remove(playlistId)) rev += playlistId } else rev -= playlistId
+        // 0.11: Custom flips too (▾ = the playlist in reverse order).
+        if (same) { if (!rev.remove(playlistId)) rev += playlistId } else rev -= playlistId
         p[K.playlistSortReversed] = json.encodeToString(rev.toList())
     }
 
